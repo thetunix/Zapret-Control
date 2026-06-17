@@ -811,6 +811,49 @@
       requestAnimationFrame(loop);
     })();
   }
+  async function fetchLatestRelease() {
+  const repo = 'thetunix/Zapret-Control';
+  const apiUrl = `https://api.github.com/repos/${repo}/releases/latest`;
+  const fallbackUrl = `https://github.com/${repo}/releases/latest`;
+
+  try {
+    const response = await fetch(apiUrl);
+    if (!response.ok) throw new Error('Не удалось получить данные о релизе');
+    
+    const data = await response.json();
+    
+    // Ищем в ассетах релиза файл с расширением .exe
+    const exeAsset = data.assets.find(asset => asset.name.endsWith('.exe'));
+    
+    // Если нашли exe, берем прямую ссылку, иначе отправляем просто на страницу последнего релиза
+    const downloadUrl = exeAsset ? exeAsset.browser_download_url : fallbackUrl;
+    
+    // Обновляем ссылки во всех кнопках
+    const navBtn = document.querySelector('.nav-cta');
+    const mainBtn = document.getElementById('dlBtn');
+    
+    if (navBtn) navBtn.href = downloadUrl;
+    if (mainBtn) mainBtn.href = downloadUrl;
+
+    // Бонус: можно автоматически обновлять текст с версией на сайте
+    const versionText = document.querySelector('.dl-meta span:first-child');
+    if (versionText && data.tag_name) {
+      // Убираем букву 'v' из тега (например, v0.1.0 -> 0.1.0)
+      versionText.textContent = `Версия ${data.tag_name.replace('v', '')}`;
+    }
+
+  } catch (error) {
+    console.error('Ошибка при поиске последнего релиза:', error);
+    // В случае ошибки с интернетом или API GitHub, ставим запасную ссылку
+    const navBtn = document.querySelector('.nav-cta');
+    const mainBtn = document.getElementById('dlBtn');
+    if (navBtn) navBtn.href = fallbackUrl;
+    if (mainBtn) mainBtn.href = fallbackUrl;
+  }
+}
+
+// Запускаем функцию при загрузке страницы
+fetchLatestRelease();
 </script>
 </body>
 </html>
