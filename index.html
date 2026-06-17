@@ -792,15 +792,18 @@
   document.querySelectorAll('[data-count]').forEach(el => ci.observe(el));
 
   // ---- magnetic download button ----
-  const dl = document.getElementById('dlBtn');
-  if (dl && matchMedia('(pointer:fine)').matches) {
-    dl.addEventListener('mousemove', (e) => {
-      const r = dl.getBoundingClientRect();
-      const x = (e.clientX - r.left - r.width / 2) * 0.25;
-      const y = (e.clientY - r.top - r.height / 2) * 0.25;
-      dl.style.transform = `translate(${x}px, ${y - 2}px)`;
+  // Теперь ищем ВСЕ кнопки скачивания по классу
+  const dlBtns = document.querySelectorAll('.dl-btn');
+  if (matchMedia('(pointer:fine)').matches) {
+    dlBtns.forEach(dl => {
+      dl.addEventListener('mousemove', (e) => {
+        const r = dl.getBoundingClientRect();
+        const x = (e.clientX - r.left - r.width / 2) * 0.25;
+        const y = (e.clientY - r.top - r.height / 2) * 0.25;
+        dl.style.transform = `translate(${x}px, ${y - 2}px)`;
+      });
+      dl.addEventListener('mouseleave', () => { dl.style.transform = ''; });
     });
-    dl.addEventListener('mouseleave', () => { dl.style.transform = ''; });
   }
 
   // ---- cursor blob ----
@@ -814,65 +817,58 @@
       blob.style.transform = `translate(${bx}px, ${by}px) translate(-50%, -50%)`;
       requestAnimationFrame(loop);
     })();
-// ---- Скачивание скриптом по клику ----
-// Запасная ссылка, если API GitHub недоступен
-let latestExeUrl = 'https://github.com/thetunix/Zapret-Control/releases/latest'; 
+  } // <--- ЭТА СКОБКА БЫЛА ПОТЕРЯНА, ИЗ-ЗА НЕЕ ВСЕ СЛОМАЛОСЬ
 
-// 1. Узнаем ссылку заранее (в фоне), чтобы не было задержек при клике
-async function preloadReleaseData() {
-  const repo = 'thetunix/Zapret-Control';
-  const apiUrl = `https://api.github.com/repos/${repo}/releases/latest`;
+  // ---- Скачивание скриптом по клику ----
+  let latestExeUrl = 'https://github.com/thetunix/Zapret-Control/releases/latest'; 
 
-  try {
-    const response = await fetch(apiUrl);
-    if (!response.ok) return;
-    
-    const data = await response.json();
-    const exeAsset = data.assets.find(asset => asset.name.endsWith('.exe'));
-    
-    if (exeAsset) {
-      latestExeUrl = exeAsset.browser_download_url;
+  async function preloadReleaseData() {
+    const repo = 'thetunix/Zapret-Control';
+    const apiUrl = `https://api.github.com/repos/${repo}/releases/latest`;
+
+    try {
+      const response = await fetch(apiUrl);
+      if (!response.ok) return;
+      
+      const data = await response.json();
+      const exeAsset = data.assets.find(asset => asset.name.endsWith('.exe'));
+      
+      if (exeAsset) {
+        latestExeUrl = exeAsset.browser_download_url;
+      }
+
+      const versionText = document.querySelector('.dl-meta span:first-child');
+      if (versionText && data.tag_name) {
+        versionText.textContent = `Версия ${data.tag_name.replace('v', '')}`;
+      }
+    } catch (error) {
+      console.error('Ошибка GitHub API:', error);
     }
-
-    // Автоматически обновляем версию в тексте (Версия 1.0.0 -> Версия 0.1.0)
-    const versionText = document.querySelector('.dl-meta span:first-child');
-    if (versionText && data.tag_name) {
-      versionText.textContent = `Версия ${data.tag_name.replace('v', '')}`;
-    }
-  } catch (error) {
-    console.error('Ошибка GitHub API:', error);
   }
-}
 
-// Запускаем предзагрузку данных
-preloadReleaseData();
+  preloadReleaseData();
 
-// 2. Обработка клика по кнопке скриптом
-const dlBtn = document.getElementById('dlBtn');
-if (dlBtn) {
-  dlBtn.addEventListener('click', function(e) {
-    e.preventDefault(); // Отменяем стандартный переход по ссылке
+  // Обработка клика по ВСЕМ кнопкам скачивания
+  dlBtns.forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      // Если это кнопка-якорь в навигации, не ломаем ее
+      if (this.getAttribute('href') !== '#') return;
 
-    // Сохраняем изначальный контент кнопки
-    const originalContent = this.innerHTML;
-    
-    // Меняем текст кнопки для обратной связи
-    this.innerHTML = '<span class="dot" style="animation: none; opacity: 1;"></span> Загрузка...';
-    this.style.pointerEvents = 'none'; // Блокируем двойные клики
+      e.preventDefault(); 
 
-    // Скрипт инициирует скачивание файла
-    window.location.href = latestExeUrl;
+      const originalContent = this.innerHTML;
+      
+      this.innerHTML = '<span class="dot" style="animation: none; opacity: 1;"></span> Загрузка...';
+      this.style.pointerEvents = 'none'; 
 
-    // Возвращаем кнопку в исходное состояние через 2.5 секунды
-    setTimeout(() => {
-      this.innerHTML = originalContent;
-      this.style.pointerEvents = 'auto';
-    }, 2500);
+      window.location.href = latestExeUrl;
+
+      setTimeout(() => {
+        this.innerHTML = originalContent;
+        this.style.pointerEvents = 'auto';
+      }, 2500);
+    });
   });
-}
-
-// Запускаем функцию при загрузке страницы
-fetchLatestRelease();
 </script>
 </body>
 </html>
