@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Zapret Control Center</title>
+<meta name="description" content="Графический интерфейс для Zapret на Windows." />
+<style>
+  /* ============ RESET ============ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #000;
+    --bg-1: #08080a;
+    --bg-2: #0e0e10;
+    --surface: #141417;
+    --surface-2: #1a1a1f;
+    --ink: #f5f5f7;
+    --ink-soft: #a1a1a6;
+    --ink-mute: #6e6e73;
+    --line: rgba(255,255,255,0.08);
+    --line-soft: rgba(255,255,255,0.05);
+    --accent: #2997ff;
+    --green: #30d158;
+    --orange: #ff9f0a;
+    --red: #ff453a;
+    --max: 1040px;
+    --ease: cubic-bezier(.22,.61,.36,1);
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  html { -webkit-font-smoothing: antialiased; scroll-behavior: smooth; background: var(--bg); }
+  body {
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 17px;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+    overflow-x: hidden;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  img, svg { display: block; max-width: 100%; }
+  button { font: inherit; cursor: pointer; background: none; border: none; color: inherit; }
+
+  /* ============ TYPE ============ */
+  h1, h2, h3, h4 {
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    line-height: 1.07;
+    color: var(--ink);
+  }
+  h1 { font-size: clamp(42px, 6.8vw, 84px); font-weight: 600; letter-spacing: -0.045em; }
+  h2 { font-size: clamp(32px, 4.4vw, 56px); letter-spacing: -0.035em; }
+  h3 { font-size: 24px; }
+  p { color: var(--ink-soft); }
+  .quiet { color: var(--ink-mute); }
+
+  /* ============ NAV ============ */
+  .nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .nav-inner {
+    max-width: var(--max); margin: 0 auto;
+    height: 48px; padding: 0 22px;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px;
+  }
+  .brand { font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+  .nav-links { display: flex; gap: 26px; }
+  .nav-links a { color: var(--ink); opacity: .7; transition: opacity .2s; text-decoration: none; }
+  .nav-links a:hover { opacity: 1; text-decoration: none; }
+  .nav-cta { color: var(--accent); text-decoration: none; }
+  @media (max-width: 720px) { .nav-links { display: none; } }
+
+  /* ============ LAYOUT ============ */
+  section { padding: 110px 22px; position: relative; }
+  .container { max-width: var(--max); margin: 0 auto; }
+  .center { text-align: center; }
+
+  /* ============ HERO ============ */
+  .hero { padding-top: 84px; padding-bottom: 60px; text-align: center; position: relative; overflow: hidden; }
+  .hero-aura {
+    position: absolute; inset: -20% 0 auto 0; height: 600px; pointer-events: none; z-index: 0;
+    background: radial-gradient(50% 60% at 50% 30%, rgba(41,151,255,0.15), transparent 70%);
+    opacity: 0; animation: auraIn 1.6s var(--ease-out) .2s forwards;
+  }
+  @keyframes auraIn { to { opacity: 1; } }
+  .hero > * { position: relative; z-index: 1; }
+  .hero .lead { font-size: clamp(19px, 2vw, 24px); color: var(--ink-soft); margin: 22px auto 0; max-width: 620px; line-height: 1.4; }
+  .ctas { margin-top: 28px; display: flex; gap: 26px; justify-content: center; flex-wrap: wrap; font-size: 17px; }
+  .ctas a { display: inline-flex; align-items: center; gap: 6px; }
+  .ctas .arrow { transition: transform .3s var(--ease); display: inline-block; }
+  .ctas a:hover .arrow { transform: translateX(5px); }
+  .ctas a { text-decoration: none; }
+  .meta { margin-top: 14px; font-size: 14px; color: var(--ink-mute); }
+
+  /* word-by-word reveal for h1 */
+  .reveal-words .w {
+    display: inline-block;
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity .9s var(--ease-out), transform .9s var(--ease-out);
+  }
+  .reveal-words.in .w { opacity: 1; transform: none; }
+  .reveal-words .w + .w { margin-left: 0.22em; }
+
+  /* ============ MOCKUP ============ */
+  .product { max-width: 1100px; margin: 70px auto 0; padding: 0 22px; perspective: 1800px; }
+  .shot {
+    background: linear-gradient(180deg, #131316, #0a0a0d);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.02),
+      0 40px 100px -30px rgba(0,0,0,0.9),
+      0 0 120px -40px rgba(41,151,255,0.25);
+    transform: rotateX(8deg) translateY(40px);
+    opacity: 0;
+    transition: transform 1.2s var(--ease-out), opacity 1.2s var(--ease-out), box-shadow .4s var(--ease);
+    will-change: transform;
+  }
+  .shot.in { opacity: 1; transform: rotateX(8deg); }
+  .shot-bar {
+    display: flex; align-items: center; gap: 7px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--line-soft);
+    background: rgba(255,255,255,0.02);
+  }
+  .shot-bar i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+  .shot-bar i.r { background: #ff5f57; }
+  .shot-bar i.y { background: #febc2e; }
+  .shot-bar i.g { background: #28c840; }
+  .shot-bar .t { margin-left: 12px; font-size: 12px; color: var(--ink-mute); }
+  .shot-body { display: grid; grid-template-columns: 200px 1fr; min-height: 440px; }
+  .sb-side {
+    border-right: 1px solid var(--line-soft);
+    padding: 16px 10px;
+    background: rgba(0,0,0,0.3);
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .sb-side .gp { font-size: 10.5px; color: var(--ink-mute); text-transform: uppercase; letter-spacing: .06em; padding: 14px 10px 6px; }
+  .sb-side .it { padding: 8px 10px; border-radius: 7px; font-size: 13.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 9px; transition: background .2s, color .2s; }
+  .sb-side .it:hover { background: rgba(255,255,255,0.04); color: var(--ink); }
+  .sb-side .it.on { background: rgba(255,255,255,0.06); color: var(--ink); }
+  .sb-side svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.6; fill: none; }
+  .sb-main { padding: 22px 26px; display: flex; flex-direction: column; gap: 16px; }
+  .sb-status {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--line); border-radius: 12px;
+    background: rgba(255,255,255,0.02);
+  }
+  .sb-status .led { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgba(48,209,88,0.2); animation: pulse 2.2s infinite; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(48,209,88,0.2); }
+    50% { box-shadow: 0 0 0 8px rgba(48,209,88,0.05); }
+  }
+  .sb-status .h { font-size: 14.5px; font-weight: 500; }
+  .sb-status .s { font-size: 12px; color: var(--ink-mute); }
+  .sb-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .sb-card { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.02); }
+  .sb-card h5 { font-size: 11px; color: var(--ink-mute); font-weight: 500; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+  .sb-card .v { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+  .sb-prog { height: 4px; background: rgba(255,255,255,0.06); border-radius: 99px; overflow: hidden; margin-top: 10px; }
+  .sb-prog > i { display: block; height: 100%; width: 68%; background: linear-gradient(90deg, var(--accent), #5ac8fa); border-radius: 99px; animation: prog 3.8s var(--ease) infinite alternate; }
+  @keyframes prog { from { width: 22%; } to { width: 92%; } }
+  .sb-log { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--ink-soft); background: rgba(0,0,0,0.4); min-height: 100px; }
+  .sb-log span { display: block; opacity: 0; animation: type .4s var(--ease-out) forwards; }
+  .sb-log span:nth-child(1) { animation-delay: 1.0s; }
+  .sb-log span:nth-child(2) { animation-delay: 1.6s; }
+  .sb-log span:nth-child(3) { animation-delay: 2.3s; }
+  .sb-log span:nth-child(4) { animation-delay: 3.0s; }
+  .sb-log .ok { color: var(--green); }
+  .sb-log .info { color: #64d2ff; }
+  @keyframes type { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  @media (max-width: 720px) {
+    .shot-body { grid-template-columns: 1fr; }
+    .sb-side { display: none; }
+  }
+
+  /* ============ MARQUEE ============ */
+  .marquee {
+    overflow: hidden;
+    padding: 30px 0;
+    border-top: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  }
+  .marquee-track {
+    display: flex; gap: 50px;
+    animation: marquee 28s linear infinite;
+    white-space: nowrap;
+    width: max-content;
+  }
+  .marquee span {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 14px; color: var(--ink-mute);
+    font-family: 'SF Pro Display', sans-serif;
+  }
+  .marquee svg { width: 16px; height: 16px; opacity: .6; }
+  @keyframes marquee { to { transform: translateX(-50%); } }
+
+  /* ============ PITCH ============ */
+  .pitch { padding: 140px 22px 100px; }
+  .pitch .container { max-width: 800px; }
+  .pitch h2 { font-size: clamp(28px, 3.8vw, 46px); letter-spacing: -0.03em; line-height: 1.18; }
+  .pitch h2 .dim { color: var(--ink-mute); }
+
+  /* ============ STATS ============ */
+  .stats {
+    background: var(--bg-1);
+    border-top: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .stats .container { display: grid; grid-template-columns: repeat(4, 1fr); gap: 40px; text-align: center; }
+  @media (max-width: 720px) { .stats .container { grid-template-columns: repeat(2, 1fr); gap: 32px; } }
+  .stat .num {
+    font-family: 'SF Pro Display', sans-serif;
+    font-size: clamp(40px, 5vw, 64px);
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    background: linear-gradient(180deg, #fff, #888);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .stat .lbl { margin-top: 10px; font-size: 13px; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* ============ DUO ============ */
+  .duo .container { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
+  @media (max-width: 820px) { .duo .container { grid-template-columns: 1fr; gap: 40px; } }
+  .duo .text h2 { margin-bottom: 18px; }
+  .duo .text p { font-size: 18px; color: var(--ink-soft); }
+  .duo ul { margin-top: 22px; display: flex; flex-direction: column; gap: 10px; }
+  .duo li { font-size: 16px; color: var(--ink-soft); display: flex; gap: 10px; align-items: flex-start; }
+  .duo li svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 4px; stroke: var(--green); stroke-width: 2.2; fill: none; }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 18px; padding: 22px;
+    box-shadow: 0 30px 80px -40px rgba(41,151,255,0.3);
+  }
+  .panel .pl-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; font-size: 13px; }
+  .panel .pl-head .l { font-weight: 600; }
+  .panel .pl-head .r { color: var(--ink-mute); }
+  .row {
+    display: grid; grid-template-columns: 1fr auto; gap: 14px;
+    padding: 11px 14px; border-radius: 10px;
+    font-size: 14px;
+    border: 1px solid var(--line-soft);
+    margin-bottom: 6px;
+    background: var(--surface-2);
+    transition: transform .3s var(--ease), border-color .3s;
+  }
+  .row:hover { transform: translateX(4px); border-color: var(--line); }
+  .row .nm { display: flex; align-items: center; gap: 10px; }
+  .row .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .row .ms { color: var(--ink-mute); font-family: ui-monospace, monospace; font-size: 12.5px; }
+  .row.best { border-color: rgba(48,209,88,0.4); background: linear-gradient(90deg, rgba(48,209,88,0.08), transparent); }
+  .row.best .nm { font-weight: 600; color: var(--ink); }
+  .row.warn .dot { background: var(--orange); }
+  .row.fail .dot { background: var(--red); }
+  .row.scan { position: relative; overflow: hidden; }
+  .row.scan::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(41,151,255,0.15), transparent);
+    animation: scan 2s linear infinite;
+  }
+  @keyframes scan { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+  /* ============ FEATURES (editorial) ============ */
+  .feat { border-top: 1px solid var(--line-soft); }
+  .feat-row {
+    display: grid; grid-template-columns: 280px 1fr;
+    gap: 60px;
+    padding: 56px 0;
+    border-bottom: 1px solid var(--line-soft);
+    align-items: start;
+    position: relative;
+  }
+  .feat-row::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+    width: 2px; background: var(--accent);
+    transform: scaleY(0); transform-origin: top;
+    transition: transform .6s var(--ease-out);
+  }
+  .feat-row:hover::before { transform: scaleY(1); }
+  @media (max-width: 720px) {
+    .feat-row { grid-template-columns: 1fr; gap: 14px; padding: 40px 0; padding-left: 16px; }
+    .feat-row::before { display: block; }
+  }
+  .feat-row .num { font-size: 13px; color: var(--ink-mute); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+  .feat-row h3 { font-size: 26px; margin-bottom: 10px; }
+  .feat-row p { font-size: 17px; color: var(--ink-soft); max-width: 580px; }
+
+  /* ============ THEMES ============ */
+  .themes-strip {
+    display: grid; grid-template-columns: repeat(9, 1fr); gap: 10px;
+    max-width: 760px; margin: 44px auto 0;
+  }
+  @media (max-width: 820px) { .themes-strip { grid-template-columns: repeat(3, 1fr); } }
+  .swatch {
+    aspect-ratio: 1;
+    border-radius: 12px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    transition: transform .4s var(--ease-out), box-shadow .4s var(--ease-out);
+    cursor: pointer;
+  }
+  .swatch:hover { transform: translateY(-6px) scale(1.05); box-shadow: 0 20px 40px -20px rgba(0,0,0,0.6); }
+  .swatch span {
+    position: absolute; bottom: 6px; left: 0; right: 0;
+    text-align: center; font-size: 10px;
+    color: rgba(255,255,255,0.85); letter-spacing: 0.02em;
+  }
+  .swatch::before {
+    content: ''; position: absolute; inset: 0;
+    background: inherit;
+    animation: shimmer 6s ease-in-out infinite alternate;
+  }
+  @keyframes shimmer { 0% { filter: hue-rotate(0deg); } 100% { filter: hue-rotate(20deg); } }
+  .s-figma    { background: radial-gradient(circle at 30% 30%, #5e5ce6, #1a1a2e 75%); }
+  .s-aurora   { background: linear-gradient(135deg, #00c6ff, #92fe9d, #c471f5); }
+  .s-graphite { background: linear-gradient(135deg, #2c2c2e, #48484a); }
+  .s-ember    { background: linear-gradient(135deg, #ff512f, #f09819 60%, #1c1c1c); }
+  .s-glacier  { background: linear-gradient(135deg, #4facfe, #00f2fe 70%, #1f3a5f); }
+  .s-orchid   { background: linear-gradient(135deg, #ee0979, #b8478f, #2a0845); }
+  .s-forest   { background: linear-gradient(135deg, #134e5e, #71b280 60%, #0b3d2e); }
+  .s-ruby     { background: linear-gradient(135deg, #ed213a, #93291e 60%, #1a0000); }
+  .s-noir     { background: radial-gradient(circle at 50% 0%, #2a2a2a, #000); }
+
+  /* ============ DOWNLOAD ============ */
+  .download {
+    text-align: center; padding: 130px 22px;
+    position: relative; overflow: hidden;
+  }
+  .download::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(50% 60% at 50% 50%, rgba(41,151,255,0.18), transparent 70%);
+    z-index: 0;
+  }
+  .download > * { position: relative; z-index: 1; }
+  .download h2 { font-size: clamp(32px, 4.2vw, 50px); }
+  .download p { font-size: 19px; max-width: 540px; margin: 18px auto 30px; }
+  .dl-btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 15px 28px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 980px;
+    font-size: 15px; font-weight: 500;
+    transition: background .25s, transform .3s var(--ease-out), box-shadow .3s var(--ease-out);
+    text-decoration: none;
+    position: relative;
+    box-shadow: 0 10px 30px -8px rgba(41,151,255,0.5);
+  }
+  .dl-btn:hover { background: #1a8fff; transform: translateY(-2px); text-decoration: none; box-shadow: 0 18px 40px -8px rgba(41,151,255,0.7); }
+  .dl-btn .dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.7); animation: pulse2 1.6s infinite; }
+  @keyframes pulse2 { 0%,100% { opacity: 0.7; transform: scale(1); } 50% { opacity: 1; transform: scale(1.4); } }
+  .dl-meta { margin-top: 18px; font-size: 13px; color: var(--ink-mute); }
+  .dl-meta span + span::before { content: '·'; margin: 0 8px; }
+
+  /* ============ FAQ ============ */
+  .faq .container { max-width: 760px; }
+  .faq h2 { text-align: center; margin-bottom: 40px; }
+  details {
+    border-bottom: 1px solid var(--line-soft);
+    padding: 20px 0;
+  }
+  details summary {
+    cursor: pointer; list-style: none;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 18px; color: var(--ink); font-weight: 500;
+    transition: color .2s;
+  }
+  details summary:hover { color: var(--accent); }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::after {
+    content: ''; display: block; width: 12px; height: 12px;
+    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%23a1a1a6' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
+    transition: transform .3s var(--ease-out);
+  }
+  details[open] summary::after { transform: rotate(180deg); }
+  details[open] summary { color: var(--ink); }
+  details p { margin-top: 12px; font-size: 16px; color: var(--ink-soft); animation: fade .4s var(--ease-out); }
+  details code { background: var(--surface); padding: 1px 6px; border-radius: 4px; font-size: 14px; color: var(--ink); }
+  @keyframes fade { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+  /* ============ FOOTER ============ */
+  footer {
+    background: var(--bg-1);
+    border-top: 1px solid var(--line-soft);
+    padding: 28px 22px;
+    font-size: 12px;
+    color: var(--ink-mute);
+  }
+  .foot { max-width: var(--max); margin: 0 auto; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  .foot a { color: var(--ink-mute); }
+  .foot a:hover { color: var(--ink); text-decoration: none; }
+
+  /* ============ REVEAL ============ */
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .8s var(--ease-out), transform .8s var(--ease-out); }
+  .reveal.in { opacity: 1; transform: none; }
+  .d1 { transition-delay: .08s; } .d2 { transition-delay: .16s; }
+  .d3 { transition-delay: .24s; } .d4 { transition-delay: .32s; }
+  .d5 { transition-delay: .4s; }
+
+  /* cursor blob (subtle) */
+  .blob {
+    position: fixed; top: 0; left: 0;
+    width: 400px; height: 400px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(41,151,255,0.08), transparent 70%);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: opacity .3s;
+    z-index: 1;
+    mix-blend-mode: screen;
+    opacity: 0;
+  }
+  @media (hover: hover) { .blob.on { opacity: 1; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .reveal { opacity: 1 !important; transform: none !important; }
+    .reveal-words .w { opacity: 1 !important; transform: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="blob" id="blob"></div>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <span class="brand">Zapret Control</span>
+    <div class="nav-links">
+      <a href="#overview">Обзор</a>
+      <a href="#features">Возможности</a>
+      <a href="#themes">Темы</a>
+      <a href="#faq">Вопросы</a>
+    </div>
+    <a href="#download" class="nav-cta">Скачать →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-aura"></div>
+  <div class="container">
+    <h1 class="reveal-words" data-words>Zapret. Теперь без командной строки.</h1>
+    <p class="lead reveal d3">Одно окно для всех конфигураций, тестов и обновлений.</p>
+    <div class="ctas reveal d4">
+      <a href="#download">Скачать для Windows <span class="arrow">→</span></a>
+      <a href="#overview">Посмотреть, как работает <span class="arrow">→</span></a>
+    </div>
+    <div class="meta reveal d5">Для Windows 10 и 11. Бесплатно.</div>
+  </div>
+
+  <div class="product" id="overview">
+    <div class="shot" id="mock">
+      <div class="shot-bar">
+        <i class="r"></i><i class="y"></i><i class="g"></i>
+        <span class="t">Zapret Control Center</span>
+      </div>
+      <div class="shot-body">
+        <aside class="sb-side">
+          <div class="gp">Обзор</div>
+          <div class="it on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>Статус</div>
+          <div class="it"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>Конфигурации</div>
+          <div class="it"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 3v6h6"/></svg>Тестирование</div>
+          <div class="it"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="6" rx="1"/><rect x="4" y="13" width="16" height="6" rx="1"/></svg>Списки</div>
+          <div class="gp">Система</div>
+          <div class="it"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2 2M16.4 16.4l2 2M5.6 18.4l2-2M16.4 7.6l2-2"/></svg>Настройки</div>
+          <div class="it"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1"/><path d="M4 9h16"/></svg>Логи</div>
+        </aside>
+        <div class="sb-main">
+          <div class="sb-status">
+            <span class="led"></span>
+            <div>
+              <div class="h">Активен</div>
+              <div class="s">general (ALT).bat · winws.exe v70</div>
+            </div>
+          </div>
+          <div class="sb-row">
+            <div class="sb-card">
+              <h5>Лучший конфиг</h5>
+              <div class="v">general (ALT)</div>
+              <div class="sb-prog"><i></i></div>
+            </div>
+            <div class="sb-card">
+              <h5>Авто-тест</h5>
+              <div class="v">12 / 17</div>
+              <div class="sb-prog"><i></i></div>
+            </div>
+          </div>
+          <div class="sb-log">
+            <span class="info">[12:04:01] Запуск winws.exe…</span>
+            <span class="ok">[12:04:02] ✓ Сервис запущен</span>
+            <span class="info">[12:04:05] Проверка обновлений с GitHub…</span>
+            <span class="ok">[12:04:07] ✓ Установлена последняя версия</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MARQUEE -->
+<div class="marquee">
+  <div class="marquee-track">
+    <span><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.5 4.5a16 16 0 0 0-4-1.2l-.2.4a14.6 14.6 0 0 1 4 1.2zm-15 0a16 16 0 0 1 4-1.2l.2.4a14.6 14.6 0 0 0-4 1.2zM12 22a9 9 0 0 0 8-12c-1.5-3-4.5-5-8-5s-6.5 2-8 5a9 9 0 0 0 8 12z"/></svg> Discord</span>
+    <span><svg viewBox="0 0 24 24" fill="currentColor"><path d="M23 7s-.2-1.6-.9-2.3c-.8-.9-1.8-.9-2.2-1C16.8 3.4 12 3.4 12 3.4s-4.8 0-7.9.3c-.4 0-1.4 0-2.2 1C1.2 5.4 1 7 1 7S.8 9 .8 11v1.9c0 2 .2 4 .2 4s.2 1.6.9 2.3c.8.9 2 .9 2.4 1 1.7.2 7.7.3 7.7.3s4.8 0 7.9-.3c.4 0 1.4 0 2.2-1 .7-.7.9-2.3.9-2.3s.2-2 .2-4V11C23.2 9 23 7 23 7zM9.7 14.6V8.3l6.4 3.2-6.4 3.1z"/></svg> YouTube</span>
+    <span>17 конфигураций</span>
+    <span>9 тем оформления</span>
+    <span>Авто-обновления</span>
+    <span>Режим трея</span>
+    <span>Права админа</span>
+    <span>Open source</span>
+    <!-- dup -->
+    <span><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.5 4.5a16 16 0 0 0-4-1.2l-.2.4a14.6 14.6 0 0 1 4 1.2zm-15 0a16 16 0 0 1 4-1.2l.2.4a14.6 14.6 0 0 0-4 1.2zM12 22a9 9 0 0 0 8-12c-1.5-3-4.5-5-8-5s-6.5 2-8 5a9 9 0 0 0 8 12z"/></svg> Discord</span>
+    <span><svg viewBox="0 0 24 24" fill="currentColor"><path d="M23 7s-.2-1.6-.9-2.3c-.8-.9-1.8-.9-2.2-1C16.8 3.4 12 3.4 12 3.4s-4.8 0-7.9.3c-.4 0-1.4 0-2.2 1C1.2 5.4 1 7 1 7S.8 9 .8 11v1.9c0 2 .2 4 .2 4s.2 1.6.9 2.3c.8.9 2 .9 2.4 1 1.7.2 7.7.3 7.7.3s4.8 0 7.9-.3c.4 0 1.4 0 2.2-1 .7-.7.9-2.3.9-2.3s.2-2 .2-4V11C23.2 9 23 7 23 7zM9.7 14.6V8.3l6.4 3.2-6.4 3.1z"/></svg> YouTube</span>
+    <span>17 конфигураций</span>
+    <span>9 тем оформления</span>
+    <span>Авто-обновления</span>
+    <span>Режим трея</span>
+    <span>Права админа</span>
+    <span>Open source</span>
+  </div>
+</div>
+
+<!-- PITCH -->
+<section class="pitch">
+  <div class="container">
+    <h2 class="reveal">
+      17 готовых конфигураций, одна кнопка «Найти лучшую».
+      <span class="dim">Discord и YouTube возвращаются без вашего участия.</span>
+    </h2>
+  </div>
+</section>
+
+<!-- STATS -->
+<section class="stats">
+  <div class="container">
+    <div class="stat reveal"><div class="num" data-count="17">0</div><div class="lbl">конфигураций</div></div>
+    <div class="stat reveal d1"><div class="num" data-count="9">0</div><div class="lbl">тем оформления</div></div>
+    <div class="stat reveal d2"><div class="num" data-count="500">0</div><div class="lbl">логов в памяти</div></div>
+    <div class="stat reveal d3"><div class="num" data-count="3" data-suffix=" с">0</div><div class="lbl">обновление статуса</div></div>
+  </div>
+</section>
+
+<!-- DUO -->
+<section class="duo">
+  <div class="container">
+    <div class="text reveal">
+      <h2>Авто-тестирование.</h2>
+      <p>Программа перебирает все конфигурации по вашим целям из <code style="background: var(--surface); padding: 2px 6px; border-radius: 4px; color: var(--ink); font-size: 15px;">targets.txt</code>, замеряет время отклика и запоминает самую быструю.</p>
+      <ul>
+        <li><svg viewBox="0 0 24 24"><polyline points="4 12 10 18 20 6"/></svg> Режимы fast и full</li>
+        <li><svg viewBox="0 0 24 24"><polyline points="4 12 10 18 20 6"/></svg> Лучший конфиг применяется автоматически</li>
+        <li><svg viewBox="0 0 24 24"><polyline points="4 12 10 18 20 6"/></svg> Прогресс виден в реальном времени</li>
+      </ul>
+    </div>
+    <div class="panel reveal d1">
+      <div class="pl-head">
+        <span class="l">Тест 12 / 17</span>
+        <span class="r">fast mode</span>
+      </div>
+      <div class="row"><div class="nm"><span class="dot"></span>general.bat</div><div class="ms">312 ms</div></div>
+      <div class="row best"><div class="nm"><span class="dot"></span>general (ALT).bat</div><div class="ms">186 ms</div></div>
+      <div class="row"><div class="nm"><span class="dot"></span>general (FAKE TLS AUTO).bat</div><div class="ms">274 ms</div></div>
+      <div class="row warn"><div class="nm"><span class="dot"></span>general (SIMPLE FAKE).bat</div><div class="ms">512 ms</div></div>
+      <div class="row fail"><div class="nm"><span class="dot"></span>general (FAKE 3).bat</div><div class="ms">timeout</div></div>
+      <div class="row scan"><div class="nm"><span class="dot" style="background: var(--accent)"></span>general (ALT2).bat</div><div class="ms">сканирование…</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="container">
+    <div style="text-align:center; margin-bottom: 60px;">
+      <h2 class="reveal">Возможности.</h2>
+      <p class="reveal d1" style="margin-top: 16px; font-size: 19px;">Всё, что раньше жило в .bat-файлах и командной строке.</p>
+    </div>
+
+    <div class="feat">
+      <div class="feat-row reveal">
+        <div class="num">01 / Управление</div>
+        <div>
+          <h3>Запуск, остановка, перезапуск.</h3>
+          <p>winws.exe контролируется из одного окна. Статус обновляется каждые три секунды, вы всегда видите текущий конфиг и версию.</p>
+        </div>
+      </div>
+      <div class="feat-row reveal">
+        <div class="num">02 / Конфигурации</div>
+        <div>
+          <h3>17 вариантов в одном меню.</h3>
+          <p>general, ALT, SIMPLE FAKE, FAKE TLS AUTO и все остальные. Без ручного редактирования файлов.</p>
+        </div>
+      </div>
+      <div class="feat-row reveal">
+        <div class="num">03 / Списки</div>
+        <div>
+          <h3>Редактор исключений.</h3>
+          <p>Добавляйте и убирайте домены в list-general-user.txt прямо из интерфейса. Изменения применяются без перезапуска.</p>
+        </div>
+      </div>
+      <div class="feat-row reveal">
+        <div class="num">04 / Обновления</div>
+        <div>
+          <h3>Подхват релизов с GitHub.</h3>
+          <p>Проверяет Flowseal/zapret-discord-youtube, скачивает и применяет обновления. Можно выключить, если нужен контроль.</p>
+        </div>
+      </div>
+      <div class="feat-row reveal">
+        <div class="num">05 / Автозапуск</div>
+        <div>
+          <h3>Включается вместе с Windows.</h3>
+          <p>Стартует в фоне, сворачивается в трей, применяет лучшую конфигурацию и не мешает вам работать.</p>
+        </div>
+      </div>
+      <div class="feat-row reveal">
+        <div class="num">06 / Логи</div>
+        <div>
+          <h3>500 последних событий.</h3>
+          <p>Все действия видны в окне «Логи». Можно очистить, скопировать или использовать для диагностики.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- THEMES -->
+<section id="themes">
+  <div class="container center">
+    <h2 class="reveal">Девять тем.</h2>
+    <p class="reveal d1" style="margin: 18px auto 0; font-size: 19px; max-width: 540px;">Регулируйте размытие, интенсивность фона и скорость анимаций.</p>
+    <div class="themes-strip">
+      <div class="swatch s-figma reveal"><span>Figma</span></div>
+      <div class="swatch s-aurora reveal d1"><span>Aurora</span></div>
+      <div class="swatch s-graphite reveal d2"><span>Graphite</span></div>
+      <div class="swatch s-ember reveal d3"><span>Ember</span></div>
+      <div class="swatch s-glacier reveal d4"><span>Glacier</span></div>
+      <div class="swatch s-orchid reveal d5"><span>Orchid</span></div>
+      <div class="swatch s-forest reveal d1"><span>Forest</span></div>
+      <div class="swatch s-ruby reveal d2"><span>Ruby</span></div>
+      <div class="swatch s-noir reveal d3"><span>Noir</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- DOWNLOAD -->
+<section id="download" class="download">
+  <div class="container">
+    <h2 class="reveal">Готовы попробовать?</h2>
+    <p class="reveal d1">Скачайте установщик, запустите и дайте программе подобрать лучший конфиг.</p>
+    <div class="reveal d2">
+      <a href="#" class="dl-btn" id="dlBtn">
+        <span class="dot"></span>
+        Скачать для Windows
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </a>
+    </div>
+    <div class="dl-meta reveal d3">
+      <span>Версия 1.0.0</span>
+      <span>78 МБ</span>
+      <span>x64</span>
+      <span>Требует прав администратора</span>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq" class="faq">
+  <div class="container">
+    <h2 class="reveal">Частые вопросы.</h2>
+    <div class="reveal d1">
+      <details><summary>Что такое Zapret?</summary><p>Zapret — консольная утилита для обхода блокировок на Windows. Control Center — графическая оболочка над ней.</p></details>
+      <details><summary>Зачем нужны права администратора?</summary><p>Для запуска <code>winws.exe</code>, регистрации сервиса Windows и работы с сетевым стеком. UAC запрашивается при старте.</p></details>
+      <details><summary>Как работает авто-тест?</summary><p>Программа берёт цели из <code>utils/targets.txt</code>, прогоняет каждую конфигурацию и выбирает самую быструю.</p></details>
+      <details><summary>Можно редактировать списки?</summary><p>Да. <code>list-general-user.txt</code> редактируется прямо в интерфейсе, изменения подхватываются без перезапуска.</p></details>
+      <details><summary>Как обновляется Zapret?</summary><p>Через релизы репозитория <code>Flowseal/zapret-discord-youtube</code>. Можно включить автообновление или ставить вручную.</p></details>
+      <details><summary>Работает на macOS или Linux?</summary><p>Нет. Zapret и Control Center предназначены для Windows 10 и 11.</p></details>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="foot">
+    <div>Zapret Control Center · Не является официальным продуктом Apple Inc.</div>
+    <div>
+      <a href="https://github.com/Flowseal/zapret-discord-youtube" target="_blank" rel="noopener">GitHub</a>
+      &nbsp; · &nbsp;
+      <a href="#faq">Поддержка</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // ---- word-by-word reveal ----
+  document.querySelectorAll('[data-words]').forEach(el => {
+    const text = el.textContent;
+    el.textContent = '';
+    text.split(' ').forEach((w, i) => {
+      const s = document.createElement('span');
+      s.className = 'w';
+      s.style.transitionDelay = (i * 90) + 'ms';
+      s.textContent = w;
+      el.appendChild(s);
+    });
+    requestAnimationFrame(() => el.classList.add('in'));
+  });
+
+  // ---- generic reveal ----
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+  // ---- mock reveal + parallax tilt ----
+  const mock = document.getElementById('mock');
+  if (mock) {
+    const mio = new IntersectionObserver((ents) => {
+      ents.forEach(e => { if (e.isIntersecting) { mock.classList.add('in'); mio.unobserve(mock); } });
+    }, { threshold: 0.15 });
+    mio.observe(mock);
+
+    let raf = null, tx = 0, ty = 0, cx = 0, cy = 0;
+    if (matchMedia('(pointer:fine)').matches) {
+      mock.parentElement.addEventListener('mousemove', (e) => {
+        const r = mock.getBoundingClientRect();
+        const x = (e.clientX - r.left) / r.width - 0.5;
+        const y = (e.clientY - r.top) / r.height - 0.5;
+        tx = x * 8; ty = y * 6;
+        if (!raf) raf = requestAnimationFrame(tick);
+      });
+      mock.parentElement.addEventListener('mouseleave', () => { tx = 0; ty = 0; });
+      function tick() {
+        cx += (tx - cx) * 0.08;
+        cy += (ty - cy) * 0.08;
+        mock.style.transform = `rotateX(${8 - cy}deg) rotateY(${cx}deg)`;
+        if (Math.abs(tx - cx) > 0.01 || Math.abs(ty - cy) > 0.01) {
+          raf = requestAnimationFrame(tick);
+        } else { raf = null; }
+      }
+    }
+
+    // scroll parallax on mock
+    let lastScroll = 0;
+    window.addEventListener('scroll', () => {
+      const rect = mock.getBoundingClientRect();
+      if (rect.bottom < 0 || rect.top > innerHeight) return;
+      const progress = 1 - (rect.top / innerHeight);
+      const ty2 = Math.max(-30, Math.min(30, progress * -20));
+      mock.style.setProperty('--ty', ty2 + 'px');
+    }, { passive: true });
+  }
+
+  // ---- animated counters ----
+  const ci = new IntersectionObserver((ents) => {
+    ents.forEach(e => {
+      if (!e.isIntersecting) return;
+      const el = e.target;
+      const target = parseInt(el.dataset.count, 10);
+      const suffix = el.dataset.suffix || '';
+      const dur = 1400;
+      const start = performance.now();
+      function step(now) {
+        const p = Math.min(1, (now - start) / dur);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = Math.round(target * eased) + suffix;
+        if (p < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+      ci.unobserve(el);
+    });
+  }, { threshold: 0.5 });
+  document.querySelectorAll('[data-count]').forEach(el => ci.observe(el));
+
+  // ---- magnetic download button ----
+  const dl = document.getElementById('dlBtn');
+  if (dl && matchMedia('(pointer:fine)').matches) {
+    dl.addEventListener('mousemove', (e) => {
+      const r = dl.getBoundingClientRect();
+      const x = (e.clientX - r.left - r.width / 2) * 0.25;
+      const y = (e.clientY - r.top - r.height / 2) * 0.25;
+      dl.style.transform = `translate(${x}px, ${y - 2}px)`;
+    });
+    dl.addEventListener('mouseleave', () => { dl.style.transform = ''; });
+  }
+
+  // ---- cursor blob ----
+  const blob = document.getElementById('blob');
+  if (blob && matchMedia('(pointer:fine)').matches) {
+    let bx = innerWidth/2, by = innerHeight/2, tx2 = bx, ty2 = by;
+    window.addEventListener('mousemove', (e) => { tx2 = e.clientX; ty2 = e.clientY; blob.classList.add('on'); });
+    (function loop() {
+      bx += (tx2 - bx) * 0.08;
+      by += (ty2 - by) * 0.08;
+      blob.style.transform = `translate(${bx}px, ${by}px) translate(-50%, -50%)`;
+      requestAnimationFrame(loop);
+    })();
+  }
+</script>
+</body>
+</html>
