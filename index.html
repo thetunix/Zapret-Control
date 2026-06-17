@@ -449,7 +449,7 @@
       <a href="#themes">Темы</a>
       <a href="#faq">Вопросы</a>
     </div>
-    <a href="https://github.com/thetunix/Zapret-Control/releases/download/v0.1.0/Zapret.Control.Center.Setup.0.1.0.exe" class="nav-cta">Скачать →</a>
+    <a href="#download" class="nav-cta">Скачать →</a>
   </div>
 </nav>
 
@@ -460,7 +460,11 @@
     <h1 class="reveal-words" data-words>Zapret. Теперь без командной строки.</h1>
     <p class="lead reveal d3">Одно окно для всех конфигураций, тестов и обновлений.</p>
     <div class="ctas reveal d4">
-      <a href="#download">Скачать для Windows <span class="arrow">→</span></a>
+      <a href="#" class="dl-btn" id="dlBtn">
+  <span class="dot"></span>
+  Скачать для Windows
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+</a>
       <a href="#overview">Посмотреть, как работает <span class="arrow">→</span></a>
     </div>
     <div class="meta reveal d5">Для Windows 10 и 11. Бесплатно.</div>
@@ -810,46 +814,61 @@
       blob.style.transform = `translate(${bx}px, ${by}px) translate(-50%, -50%)`;
       requestAnimationFrame(loop);
     })();
-  }
-  async function fetchLatestRelease() {
+// ---- Скачивание скриптом по клику ----
+// Запасная ссылка, если API GitHub недоступен
+let latestExeUrl = 'https://github.com/thetunix/Zapret-Control/releases/latest'; 
+
+// 1. Узнаем ссылку заранее (в фоне), чтобы не было задержек при клике
+async function preloadReleaseData() {
   const repo = 'thetunix/Zapret-Control';
   const apiUrl = `https://api.github.com/repos/${repo}/releases/latest`;
-  const fallbackUrl = `https://github.com/${repo}/releases/latest`;
 
   try {
     const response = await fetch(apiUrl);
-    if (!response.ok) throw new Error('Не удалось получить данные о релизе');
+    if (!response.ok) return;
     
     const data = await response.json();
-    
-    // Ищем в ассетах релиза файл с расширением .exe
     const exeAsset = data.assets.find(asset => asset.name.endsWith('.exe'));
     
-    // Если нашли exe, берем прямую ссылку, иначе отправляем просто на страницу последнего релиза
-    const downloadUrl = exeAsset ? exeAsset.browser_download_url : fallbackUrl;
-    
-    // Обновляем ссылки во всех кнопках
-    const navBtn = document.querySelector('.nav-cta');
-    const mainBtn = document.getElementById('dlBtn');
-    
-    if (navBtn) navBtn.href = downloadUrl;
-    if (mainBtn) mainBtn.href = downloadUrl;
-
-    // Бонус: можно автоматически обновлять текст с версией на сайте
-    const versionText = document.querySelector('.dl-meta span:first-child');
-    if (versionText && data.tag_name) {
-      // Убираем букву 'v' из тега (например, v0.1.0 -> 0.1.0)
-      versionText.textContent = `Версия ${data.tag_name.replace('v', '')}`;
+    if (exeAsset) {
+      latestExeUrl = exeAsset.browser_download_url;
     }
 
+    // Автоматически обновляем версию в тексте (Версия 1.0.0 -> Версия 0.1.0)
+    const versionText = document.querySelector('.dl-meta span:first-child');
+    if (versionText && data.tag_name) {
+      versionText.textContent = `Версия ${data.tag_name.replace('v', '')}`;
+    }
   } catch (error) {
-    console.error('Ошибка при поиске последнего релиза:', error);
-    // В случае ошибки с интернетом или API GitHub, ставим запасную ссылку
-    const navBtn = document.querySelector('.nav-cta');
-    const mainBtn = document.getElementById('dlBtn');
-    if (navBtn) navBtn.href = fallbackUrl;
-    if (mainBtn) mainBtn.href = fallbackUrl;
+    console.error('Ошибка GitHub API:', error);
   }
+}
+
+// Запускаем предзагрузку данных
+preloadReleaseData();
+
+// 2. Обработка клика по кнопке скриптом
+const dlBtn = document.getElementById('dlBtn');
+if (dlBtn) {
+  dlBtn.addEventListener('click', function(e) {
+    e.preventDefault(); // Отменяем стандартный переход по ссылке
+
+    // Сохраняем изначальный контент кнопки
+    const originalContent = this.innerHTML;
+    
+    // Меняем текст кнопки для обратной связи
+    this.innerHTML = '<span class="dot" style="animation: none; opacity: 1;"></span> Загрузка...';
+    this.style.pointerEvents = 'none'; // Блокируем двойные клики
+
+    // Скрипт инициирует скачивание файла
+    window.location.href = latestExeUrl;
+
+    // Возвращаем кнопку в исходное состояние через 2.5 секунды
+    setTimeout(() => {
+      this.innerHTML = originalContent;
+      this.style.pointerEvents = 'auto';
+    }, 2500);
+  });
 }
 
 // Запускаем функцию при загрузке страницы
