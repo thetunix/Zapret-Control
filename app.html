@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zapret Control Center</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-theme="figma">
+    <div class="ambient-scene" aria-hidden="true">
+      <div class="ambient-blur"></div>
+      <svg class="goo-filter" width="0" height="0" aria-hidden="true">
+        <defs>
+          <filter id="liquidGoo">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="30" result="blur" />
+            <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 12 -5" result="goo" />
+            <feGaussianBlur in="goo" stdDeviation="11" result="soft" />
+            <feBlend in="SourceGraphic" in2="soft" mode="screen" />
+          </filter>
+        </defs>
+      </svg>
+      <div class="ambient-goo">
+        <span class="blob blob-a"></span>
+        <span class="blob blob-b"></span>
+        <span class="blob blob-c"></span>
+        <span class="blob blob-d"></span>
+        <span class="blob blob-e"></span>
+        <span class="blob blob-f"></span>
+      </div>
+      <div class="ambient-grid"></div>
+    </div>
+
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7.5 18.5h9.2a4.3 4.3 0 0 0 .7-8.5A6.2 6.2 0 0 0 5.5 8.8a4.9 4.9 0 0 0 2 9.7Z" />
+            </svg>
+          </div>
+          <div>
+            <div class="brand-title">Zapret</div>
+            <div class="brand-subtitle">Control Center</div>
+          </div>
+        </div>
+
+        <nav class="nav">
+          <button class="nav-item active" data-tab="home">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5v8a1.5 1.5 0 0 1-1.5 1.5h-4v-5h-5v5h-4A1.5 1.5 0 0 1 4 18.5Z" /></svg>
+            <span>Главная</span>
+          </button>
+          <button class="nav-item" data-tab="tests">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5Zm10 0v4h4M8 11h8M8 15h8M8 19h5" /></svg>
+            <span>Тесты</span>
+          </button>
+          <button class="nav-item" data-tab="lists">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" /></svg>
+            <span>Списки</span>
+          </button>
+          <button class="nav-item" data-tab="logs">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h10M7 9h10M7 13h7M7 17h10M4 5h.01M4 9h.01M4 13h.01M4 17h.01" /></svg>
+            <span>Логи</span>
+          </button>
+          <button class="nav-item" data-tab="settings">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Zm7.3 4.8a7.5 7.5 0 0 0 0-2.6l2-1.5-2-3.4-2.4 1a8 8 0 0 0-2.2-1.3L14.4 3h-4.8l-.4 2.5A8 8 0 0 0 7 6.8l-2.4-1-2 3.4 2 1.5a7.5 7.5 0 0 0 0 2.6l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 2.2 1.3l.4 2.5h4.8l.4-2.5a8 8 0 0 0 2.2-1.3l2.4 1 2-3.4Z" /></svg>
+            <span>Настройки</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="mini-status" id="miniStatus">Проверка...</div>
+          <button class="ghost-button" id="hideToTrayBtn">В трей</button>
+        </div>
+      </aside>
+
+      <main class="content">
+        <section class="tab-panel active" id="tab-home">
+          <div class="toolbar">
+            <div>
+              <h1>Главная</h1>
+              <p id="rootPath">...</p>
+            </div>
+            <div class="toolbar-actions">
+              <button class="ghost-button icon-button" id="adminBtn">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.4 2.8 8.4 7 10 4.2-1.6 7-5.6 7-10V6Z" /></svg>
+                <span id="adminLabel">Админ</span>
+              </button>
+              <button class="ghost-button icon-button" id="openRootBtn">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v8.8a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 18.3V8a.5.5 0 0 1 .5-.5Z" /></svg>
+                <span>Папка</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="home-dashboard">
+            <section class="panel auto-panel">
+              <h2>Авто</h2>
+              <div class="switch-row">
+                <span>Запуск приложения с Windows</span>
+                <label class="switch"><input type="checkbox" id="launchAtLoginToggle" /><span></span></label>
+              </div>
+              <div class="switch-row">
+                <span>Включать лучший конфиг при старте</span>
+                <label class="switch"><input type="checkbox" id="autoStartToggle" /><span></span></label>
+              </div>
+              <div class="switch-row">
+                <span>Автообновление zapret</span>
+                <label class="switch"><input type="checkbox" id="autoUpdateToggle" /><span></span></label>
+              </div>
+              <div class="button-row">
+                <button class="ghost-button" id="checkUpdateBtn">Проверить</button>
+                <button class="ghost-button" id="openReleaseBtn">Релиз</button>
+              </div>
+              <div class="notice" id="updateNotice">...</div>
+            </section>
+
+            <section class="power-stage" aria-label="Управление zapret">
+              <button class="power-button" id="startBtn" type="button" aria-label="Включить или выключить zapret">
+                <span class="power-halo halo-one"></span>
+                <span class="power-halo halo-two"></span>
+                <span class="power-core">
+                  <span class="power-icon"></span>
+                </span>
+              </button>
+            </section>
+
+            <section class="home-bottom">
+              <div class="status-block">
+                <div class="status-line">
+                  <span class="pulse" id="statusPulse"></span>
+                  <span id="statusText">Проверка статуса</span>
+                </div>
+                <div class="process-note" id="processNote">...</div>
+
+                <div class="config-metrics-row">
+                  <div class="config-row">
+                    <label for="configSelect">Конфиг</label>
+                    <select id="configSelect"></select>
+                  </div>
+                  <div class="metrics">
+                    <div>
+                      <span>Лучший</span>
+                      <strong id="bestConfig">...</strong>
+                    </div>
+                    <div>
+                      <span>Служба</span>
+                      <strong id="serviceState">...</strong>
+                    </div>
+                    <div>
+                      <span>Версия</span>
+                      <strong id="versionState">...</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="hero-actions secondary-actions">
+                  <button class="danger-button" id="stopBtn">Остановить</button>
+                  <button class="ghost-button" id="restartBtn">Перезапуск</button>
+                </div>
+              </div>
+
+              <section class="panel logs-panel">
+                <h2>Быстрые логи</h2>
+                <div class="log-preview" id="homeLogs"></div>
+              </section>
+            </section>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-tests">
+          <div class="toolbar">
+            <div>
+              <h1>Тесты</h1>
+              <p>Подбор лучшего general-конфига</p>
+            </div>
+            <div class="toolbar-actions">
+              <select id="testModeSelect">
+                <option value="fast">Быстро</option>
+                <option value="full">Полный</option>
+              </select>
+              <button class="primary-button" id="startTestsBtn">Старт</button>
+              <button class="danger-button" id="cancelTestsBtn">Стоп</button>
+            </div>
+          </div>
+
+          <section class="panel">
+            <div class="test-status">
+              <div>
+                <strong id="testTitle">Тест не запущен</strong>
+                <span id="testDetail">...</span>
+              </div>
+              <div class="progress"><span id="testProgress"></span></div>
+            </div>
+          </section>
+
+          <section class="results-grid" id="testResults"></section>
+        </section>
+
+        <section class="tab-panel" id="tab-lists">
+          <div class="toolbar">
+            <div>
+              <h1>Списки</h1>
+              <p>list-general-user.txt</p>
+            </div>
+            <div class="toolbar-actions">
+              <button class="ghost-button" id="reloadListBtn">Обновить</button>
+            </div>
+          </div>
+
+          <section class="panel">
+            <form class="domain-form" id="domainForm">
+              <input id="domainInput" placeholder="example.com" autocomplete="off" />
+              <button class="primary-button" type="submit">Добавить</button>
+            </form>
+            <textarea id="domainTextarea" spellcheck="false"></textarea>
+            <div class="button-row">
+              <button class="primary-button" id="saveDomainsBtn">Сохранить</button>
+              <span id="domainCount">0 доменов</span>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Базовый список</h2>
+            <div class="chips" id="baseDomains"></div>
+          </section>
+        </section>
+
+        <section class="tab-panel" id="tab-logs">
+          <div class="toolbar">
+            <div>
+              <h1>Логи</h1>
+              <p>zapret-control.log</p>
+            </div>
+            <div class="toolbar-actions">
+              <button class="ghost-button" id="openLogsBtn">Папка</button>
+              <button class="danger-button" id="clearLogsBtn">Очистить</button>
+            </div>
+          </div>
+          <pre class="log-full" id="logFull"></pre>
+        </section>
+
+        <section class="tab-panel" id="tab-settings">
+          <div class="toolbar">
+            <div>
+              <h1>Настройки</h1>
+              <p>Темы, фильтр игр, служба Windows</p>
+            </div>
+          </div>
+
+          <section class="settings-grid">
+            <div class="panel">
+              <h2>Темы</h2>
+              <div class="theme-grid" id="themeGrid"></div>
+            </div>
+
+            <div class="panel">
+              <h2>Фон</h2>
+              <div class="range-row">
+                <div>
+                  <span>Свечение</span>
+                  <small id="ambientIntensityValue">72%</small>
+                </div>
+                <input type="range" id="ambientIntensityRange" min="0" max="100" step="1" />
+              </div>
+              <div class="range-row">
+                <div>
+                  <span>Размытие стекла</span>
+                  <small id="glassBlurValue">18px</small>
+                </div>
+                <input type="range" id="glassBlurRange" min="0" max="32" step="1" />
+              </div>
+              <div class="range-row">
+                <div>
+                  <span>Движение</span>
+                  <small id="motionSpeedValue">55%</small>
+                </div>
+                <input type="range" id="motionSpeedRange" min="0" max="100" step="1" />
+              </div>
+            </div>
+
+            <div class="panel">
+              <h2>Игровой фильтр</h2>
+              <div class="segmented" id="gameFilterGroup">
+                <button data-mode="disabled">Выкл</button>
+                <button data-mode="all">TCP+UDP</button>
+                <button data-mode="tcp">TCP</button>
+                <button data-mode="udp">UDP</button>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h2>Служба Windows</h2>
+              <div class="button-row">
+                <button class="primary-button" id="installServiceBtn">Установить</button>
+                <button class="danger-button" id="removeServiceBtn">Удалить</button>
+              </div>
+              <div class="notice" id="serviceNotice">...</div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./zapret-mock.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
