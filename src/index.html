@@ -9,9 +9,24 @@
   <body data-theme="figma">
     <div class="ambient-scene" aria-hidden="true">
       <div class="ambient-blur"></div>
-      <div class="ambient-shape shape-a"></div>
-      <div class="ambient-shape shape-b"></div>
-      <div class="ambient-shape shape-c"></div>
+      <svg class="goo-filter" width="0" height="0" aria-hidden="true">
+        <defs>
+          <filter id="liquidGoo">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="30" result="blur" />
+            <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 12 -5" result="goo" />
+            <feGaussianBlur in="goo" stdDeviation="11" result="soft" />
+            <feBlend in="SourceGraphic" in2="soft" mode="screen" />
+          </filter>
+        </defs>
+      </svg>
+      <div class="ambient-goo">
+        <span class="blob blob-a"></span>
+        <span class="blob blob-b"></span>
+        <span class="blob blob-c"></span>
+        <span class="blob blob-d"></span>
+        <span class="blob blob-e"></span>
+        <span class="blob blob-f"></span>
+      </div>
       <div class="ambient-grid"></div>
     </div>
 
