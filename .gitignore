@@ -8,6 +8,8 @@ out/
 *.exe
 *.exe.blockmap
 
+figmahtml
+
 # IDE
 .vscode/
 .idea/
