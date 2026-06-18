@@ -9,6 +9,8 @@ const APP_NAME = 'Zapret Control Center';
 const UPDATE_REPO = 'Flowseal/zapret-discord-youtube';
 const VERSION_URL = `https://raw.githubusercontent.com/${UPDATE_REPO}/main/.service/version.txt`;
 const RELEASE_API_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
+const SERVICE_NAME = 'zapret';
+const SERVICE_SDDL = 'D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;LCRPWPLO;;;IU)(A;;LCRPWPLO;;;AU)';
 const startupDebugFile = path.join(process.cwd(), 'startup-debug.log');
 
 const rootDir = resolveZapretRoot();
@@ -162,10 +164,8 @@ async function shouldRelaunchElevated() {
   if (await isAdministrator()) return false;
 
   const explicitAdmin = process.argv.includes('--admin');
-  const startupLaunch = process.argv.includes('--startup');
-  const packagedLaunch = app.isPackaged && !process.defaultApp;
 
-  return explicitAdmin || startupLaunch || packagedLaunch;
+  return explicitAdmin;
 }
 
 function createWindow() {
@@ -596,6 +596,33 @@ function splitArgs(input) {
 async function startZapret(configName, options = {}) {
   const config = parseConfig(configName || settings.selectedConfig);
   ensureUserLists();
+
+  const service = await getServiceStatus();
+  if (service.installed && options.useService !== false) {
+    if (service.configName && service.configName !== config.name) {
+      await installZapretService(config.name);
+      await sendState();
+      return config;
+    }
+
+    await stopZapretProcesses({ stopService: true, quiet: true, killProcesses: false });
+    log(`Starting zapret service: ${config.name}`);
+    await execFileAsync('sc.exe', ['start', SERVICE_NAME], { timeout: 10000 });
+
+    if (options.remember !== false) {
+      settings.selectedConfig = config.name;
+      saveSettings();
+    }
+
+    await delay(500);
+    await sendState();
+    return config;
+  }
+
+  if (!await isAdministrator()) {
+    throw new Error('First setup needs administrator rights. Open Settings, click Install in Windows Service, and approve UAC once.');
+  }
+
   await stopZapretProcesses({ stopService: true, quiet: true });
   await enableTcpTimestamps();
 
@@ -633,7 +660,7 @@ async function startZapret(configName, options = {}) {
 }
 
 async function stopZapretProcesses(options = {}) {
-  const { stopService = true, quiet = false } = options;
+  const { stopService = true, quiet = false, killProcesses = true } = options;
 
   if (winwsChild && !winwsChild.killed) {
     try {
@@ -643,11 +670,13 @@ async function stopZapretProcesses(options = {}) {
   winwsChild = null;
 
   if (stopService) {
-    await execFileQuiet('sc.exe', ['stop', 'zapret'], 6000);
+    await execFileQuiet('sc.exe', ['stop', SERVICE_NAME], 6000);
   }
 
-  const script = `Get-CimInstance Win32_Process -Filter "Name='winws.exe'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
-  await execFileQuiet('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], 10000);
+  if (killProcesses) {
+    const script = `Get-CimInstance Win32_Process -Filter "Name='winws.exe'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+    await execFileQuiet('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], 10000);
+  }
 
   if (!quiet) log('zapret остановлен');
   await sendState();
@@ -709,11 +738,28 @@ async function isAdministrator() {
 
 async function getServiceStatus() {
   try {
-    const { stdout } = await execFileAsync('sc.exe', ['query', 'zapret'], { timeout: 5000 });
+    const { stdout } = await execFileAsync('sc.exe', ['query', SERVICE_NAME], { timeout: 5000 });
     const state = stdout.match(/STATE\s*:\s*\d+\s+([A-Z_]+)/i)?.[1] || 'UNKNOWN';
-    return { installed: true, state };
+    const configName = await readServiceConfigName();
+    return { installed: true, state, configName };
   } catch {
-    return { installed: false, state: 'NOT_INSTALLED' };
+    return { installed: false, state: 'NOT_INSTALLED', configName: null };
+  }
+}
+
+async function readServiceConfigName() {
+  try {
+    const { stdout } = await execFileAsync('reg.exe', [
+      'query',
+      `HKLM\\System\\CurrentControlSet\\Services\\${SERVICE_NAME}`,
+      '/v',
+      'zapret-discord-youtube'
+    ], { timeout: 5000 });
+    const raw = stdout.match(/zapret-discord-youtube\s+REG_SZ\s+(.+)/i)?.[1]?.trim();
+    if (!raw) return null;
+    return /\.bat$/i.test(raw) ? raw : `${raw}.bat`;
+  } catch {
+    return null;
   }
 }
 
@@ -1064,7 +1110,7 @@ async function runConfigTests(options) {
       if (activeTest.cancelled) break;
       const config = configs[index];
       send('tests:progress', { index, total: configs.length, config: config.name, stage: 'start' });
-      await startZapret(config.name, { remember: false, reason: 'test' });
+      await startZapret(config.name, { remember: false, reason: 'test', useService: false });
       await delay(4200);
       const targetResults = await testTargets(targets, (target, targetIndex) => {
         send('tests:target', { config: config.name, target: target.name, targetIndex, totalTargets: targets.length });
@@ -1083,7 +1129,7 @@ async function runConfigTests(options) {
       log(`Лучший конфиг: ${best.config} (${best.score.total} баллов)`);
       send('tests:done', { best, results, cancelled: activeTest.cancelled });
       if (applyBest && !activeTest.cancelled) {
-        await startZapret(best.config, { remember: true, reason: 'best-test' });
+        await startZapret(best.config, { remember: true, reason: 'best-test', useService: false });
       }
     } else {
       send('tests:done', { best: null, results, cancelled: activeTest.cancelled });
@@ -1093,7 +1139,7 @@ async function runConfigTests(options) {
     activeTest = null;
     if (cancelled) {
       log('Тесты остановлены пользователем', 'warn');
-      if (wasRunning) await startZapret(previousConfig, { remember: false, reason: 'restore' });
+      if (wasRunning) await startZapret(previousConfig, { remember: false, reason: 'restore', useService: false });
     }
     await sendState();
   }
@@ -1419,6 +1465,135 @@ function quoteCommandArg(arg) {
   result += '\\'.repeat(backslashes * 2);
   result += '"';
   return result;
+}
+
+async function installZapretService(configName) {
+  const config = parseConfig(configName);
+  const admin = await isAdministrator();
+
+  if (!admin) {
+    await runElevatedServiceInstall(config);
+    settings.bestConfig = config.name;
+    settings.selectedConfig = config.name;
+    saveSettings();
+    log(`Windows service installed through UAC: ${config.name}`);
+    await sendState();
+    return;
+  }
+
+  await stopZapretProcesses({ stopService: true, quiet: true });
+  await execFileQuiet('sc.exe', ['delete', SERVICE_NAME], 5000);
+  await enableTcpTimestamps();
+  await execFileAsync('sc.exe', [
+    'create',
+    SERVICE_NAME,
+    'binPath=',
+    config.commandLine,
+    'DisplayName=',
+    SERVICE_NAME,
+    'start=',
+    'auto'
+  ], { timeout: 10000 });
+  await execFileQuiet('sc.exe', ['description', SERVICE_NAME, 'Zapret DPI bypass software'], 5000);
+  await execFileQuiet('sc.exe', ['sdset', SERVICE_NAME, SERVICE_SDDL], 5000);
+  await execFileQuiet('reg.exe', [
+    'add',
+    `HKLM\\System\\CurrentControlSet\\Services\\${SERVICE_NAME}`,
+    '/v',
+    'zapret-discord-youtube',
+    '/t',
+    'REG_SZ',
+    '/d',
+    config.name.replace(/\.bat$/i, ''),
+    '/f'
+  ], 5000);
+  await execFileAsync('sc.exe', ['start', SERVICE_NAME], { timeout: 10000 });
+  settings.bestConfig = config.name;
+  settings.selectedConfig = config.name;
+  saveSettings();
+  log(`Windows service installed: ${config.name}`);
+  await sendState();
+}
+
+async function removeZapretService() {
+  const admin = await isAdministrator();
+
+  if (!admin) {
+    await runElevatedServiceRemove();
+    log('Windows service removed through UAC');
+    await sendState();
+    return;
+  }
+
+  await execFileQuiet('sc.exe', ['stop', SERVICE_NAME], 7000);
+  await execFileQuiet('sc.exe', ['delete', SERVICE_NAME], 7000);
+  await execFileQuiet('sc.exe', ['stop', 'WinDivert'], 7000);
+  await execFileQuiet('sc.exe', ['delete', 'WinDivert'], 7000);
+  await execFileQuiet('sc.exe', ['stop', 'WinDivert14'], 7000);
+  await execFileQuiet('sc.exe', ['delete', 'WinDivert14'], 7000);
+  log('Windows service removed');
+  await sendState();
+}
+
+async function runElevatedServiceInstall(config) {
+  const serviceKey = `HKLM:\\System\\CurrentControlSet\\Services\\${SERVICE_NAME}`;
+  const script = `
+$ErrorActionPreference = 'Stop'
+function Invoke-Native {
+  param([Parameter(Mandatory=$true)][string]$FilePath, [Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
+  & $FilePath @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "$FilePath failed with exit code $LASTEXITCODE"
+  }
+}
+sc.exe stop ${quotePowerShellSingle(SERVICE_NAME)} | Out-Null
+sc.exe delete ${quotePowerShellSingle(SERVICE_NAME)} | Out-Null
+Start-Sleep -Milliseconds 700
+Get-CimInstance Win32_Process -Filter "Name='winws.exe'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Invoke-Native netsh.exe interface tcp set global timestamps=enabled
+Invoke-Native sc.exe create ${quotePowerShellSingle(SERVICE_NAME)} binPath= ${quotePowerShellSingle(config.commandLine)} DisplayName= ${quotePowerShellSingle(SERVICE_NAME)} start= auto
+Invoke-Native sc.exe description ${quotePowerShellSingle(SERVICE_NAME)} 'Zapret DPI bypass software'
+Invoke-Native sc.exe sdset ${quotePowerShellSingle(SERVICE_NAME)} ${quotePowerShellSingle(SERVICE_SDDL)}
+New-Item -Path ${quotePowerShellSingle(serviceKey)} -Force | Out-Null
+New-ItemProperty -Path ${quotePowerShellSingle(serviceKey)} -Name 'zapret-discord-youtube' -PropertyType String -Value ${quotePowerShellSingle(config.name.replace(/\.bat$/i, ''))} -Force | Out-Null
+Invoke-Native sc.exe start ${quotePowerShellSingle(SERVICE_NAME)}
+`;
+  await runElevatedPowerShellScript(script, 'install-service');
+}
+
+async function runElevatedServiceRemove() {
+  const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+sc.exe stop ${quotePowerShellSingle(SERVICE_NAME)} | Out-Null
+sc.exe delete ${quotePowerShellSingle(SERVICE_NAME)} | Out-Null
+sc.exe stop WinDivert | Out-Null
+sc.exe delete WinDivert | Out-Null
+sc.exe stop WinDivert14 | Out-Null
+sc.exe delete WinDivert14 | Out-Null
+`;
+  await runElevatedPowerShellScript(script, 'remove-service');
+}
+
+async function runElevatedPowerShellScript(script, name) {
+  const dir = path.join(app.getPath('userData'), 'elevated');
+  fs.mkdirSync(dir, { recursive: true });
+  const scriptPath = path.join(dir, `${name}-${Date.now()}.ps1`);
+  fs.writeFileSync(scriptPath, script.trim(), 'utf8');
+
+  const command = [
+    `$p = Start-Process -FilePath 'powershell.exe'`,
+    `-ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',${quotePowerShellSingle(scriptPath)})`,
+    '-Verb RunAs -Wait -PassThru;',
+    'exit $p.ExitCode'
+  ].join(' ');
+
+  try {
+    await execFileAsync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], { timeout: 120000 });
+  } catch (error) {
+    throw new Error(`Elevated action failed or was cancelled: ${error.message}`);
+  } finally {
+    fs.rm(scriptPath, { force: true }, () => {});
+  }
 }
 
 function delay(ms) {
