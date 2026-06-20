@@ -1,5 +1,4 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, shell } = require('electron');
-const { autoUpdater } = require('electron-updater');
 const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const https = require('node:https');
@@ -8,7 +7,10 @@ const path = require('node:path');
 
 const APP_NAME = 'Zapret Control Center';
 const UPDATE_REPO = 'Flowseal/zapret-discord-youtube';
+const APP_REPO = 'thetunix/Zapret-Control';
 const VERSION_URL = `https://raw.githubusercontent.com/${UPDATE_REPO}/main/.service/version.txt`;
+const APP_VERSION_URL = `https://raw.githubusercontent.com/${APP_REPO}/main/app-version.txt`;
+const APP_RELEASE_API_URL = `https://api.github.com/repos/${APP_REPO}/releases/latest`;
 const RELEASE_API_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
 const SERVICE_NAME = 'zapret';
 const SERVICE_SDDL = 'D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;LCRPWPLO;;;IU)(A;;LCRPWPLO;;;AU)';
@@ -42,6 +44,7 @@ let lastAppUpdate = {
   message: 'Проверка обновлений приложения ещё не запускалась',
   progress: 0
 };
+let pendingAppInstallerPath = null;
 
 const defaultSettings = {
   selectedConfig: 'general.bat',
@@ -195,6 +198,16 @@ function createWindow() {
   Menu.setApplicationMenu(null);
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (app.isPackaged) {
+      setTimeout(() => {
+        checkForAppUpdate().catch((error) => {
+          log(`Не удалось проверить обновление приложения: ${error.message}`, 'error');
+        });
+      }, 1500);
+    }
+  });
+
   mainWindow.on('minimize', (event) => {
     event.preventDefault();
     mainWindow.hide();
@@ -308,11 +321,12 @@ function registerIpc() {
     return buildState();
   });
   ipcMain.handle('app-update:install', () => {
-    if (lastAppUpdate.status !== 'downloaded') {
+    if (lastAppUpdate.status !== 'downloaded' || !pendingAppInstallerPath || !fs.existsSync(pendingAppInstallerPath)) {
       throw new Error('Обновление ещё не скачано');
     }
     isQuitting = true;
-    autoUpdater.quitAndInstall(false, true);
+    spawn(pendingAppInstallerPath, [], { detached: true, stdio: 'ignore' }).unref();
+    app.quit();
     return true;
   });
 
@@ -1027,94 +1041,79 @@ async function checkForZapretUpdate(options = {}) {
 }
 
 function setupAppUpdater() {
-  if (!app.isPackaged) return;
+  // Проверка запускается после загрузки окна в createWindow().
+}
 
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = false;
+async function fetchLatestAppVersion() {
+  const errors = [];
 
-  autoUpdater.on('checking-for-update', () => {
+  for (const attempt of [1, 2]) {
+    try {
+      return (await fetchText(`${APP_VERSION_URL}?t=${Date.now()}`)).trim();
+    } catch (error) {
+      errors.push(`raw: ${error.message}`);
+      await delay(800);
+    }
+  }
+
+  try {
+    const release = await fetchJson(APP_RELEASE_API_URL);
+    return String(release.tag_name || release.name || '').replace(/^v/i, '').trim();
+  } catch (error) {
+    errors.push(`api: ${error.message}`);
+  }
+
+  throw new Error(errors.join('; ') || 'Не удалось получить версию приложения');
+}
+
+function buildAppInstallerUrl(version) {
+  const safeVersion = String(version).replace(/^v/i, '');
+  const fileName = `Zapret-Control-Center-Setup-${safeVersion}.exe`;
+  return {
+    fileName,
+    url: `https://github.com/${APP_REPO}/releases/download/v${safeVersion}/${fileName}`
+  };
+}
+
+async function downloadAppUpdate(version) {
+  const { fileName, url } = buildAppInstallerUrl(version);
+  const target = path.join(app.getPath('temp'), fileName);
+
+  lastAppUpdate = {
+    status: 'downloading',
+    version,
+    message: 'Скачиваю обновление 0%',
+    progress: 0
+  };
+  sendAppUpdateProgress();
+
+  await downloadFile(url, target, 0, (loaded, total) => {
+    const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((loaded / total) * 100))) : 0;
     lastAppUpdate = {
-      status: 'checking',
-      version: lastAppUpdate.version,
-      message: 'Проверяю обновления приложения...',
-      progress: 0
-    };
-    sendAppUpdateProgress();
-  });
-
-  autoUpdater.on('update-available', (info) => {
-    lastAppUpdate = {
-      status: 'available',
-      version: info.version,
-      message: `Доступно обновление приложения ${info.version}`,
-      progress: 0
-    };
-    sendAppUpdateProgress();
-    pushNotification({
-      type: 'info',
-      title: 'Доступно обновление',
-      message: `Версия ${info.version} скачивается автоматически.`,
-      persistent: true,
-      action: 'app-update'
-    });
-    log(`Доступно обновление приложения: ${info.version}`);
-  });
-
-  autoUpdater.on('download-progress', (progress) => {
-    const percent = Math.max(0, Math.min(100, Math.round(progress.percent || 0)));
-    lastAppUpdate = {
+      ...lastAppUpdate,
       status: 'downloading',
-      version: lastAppUpdate.version,
       message: `Скачиваю обновление ${percent}%`,
       progress: percent
     };
     sendAppUpdateProgress();
   });
 
-  autoUpdater.on('update-downloaded', (info) => {
-    lastAppUpdate = {
-      status: 'downloaded',
-      version: info.version,
-      message: `Обновление ${info.version} готово к установке`,
-      progress: 100
-    };
-    sendAppUpdateProgress();
-    pushNotification({
-      type: 'success',
-      title: 'Обновление готово',
-      message: `Версия ${info.version} скачана. Нажмите «Установить», чтобы обновить приложение.`,
-      persistent: true,
-      action: 'app-update'
-    });
-    log(`Обновление приложения скачано: ${info.version}`);
+  pendingAppInstallerPath = target;
+  lastAppUpdate = {
+    status: 'downloaded',
+    version,
+    message: `Обновление ${version} готово к установке`,
+    progress: 100
+  };
+  sendAppUpdateProgress();
+  pushNotification({
+    type: 'success',
+    title: 'Обновление готово',
+    message: `Версия ${version} скачана. Нажмите «Установить», чтобы обновить приложение.`,
+    persistent: true,
+    action: 'app-update'
   });
-
-  autoUpdater.on('update-not-available', () => {
-    lastAppUpdate = {
-      status: 'up-to-date',
-      version: app.getVersion(),
-      message: `Приложение актуально (${app.getVersion()})`,
-      progress: 0
-    };
-    sendAppUpdateProgress();
-  });
-
-  autoUpdater.on('error', (error) => {
-    lastAppUpdate = {
-      status: 'error',
-      version: lastAppUpdate.version,
-      message: error?.message || 'Ошибка проверки обновлений приложения',
-      progress: 0
-    };
-    sendAppUpdateProgress();
-    log(`Ошибка автообновления приложения: ${lastAppUpdate.message}`, 'error');
-  });
-
-  setTimeout(() => {
-    checkForAppUpdate().catch((error) => {
-      log(`Не удалось проверить обновление приложения: ${error.message}`, 'error');
-    });
-  }, 2500);
+  log(`Обновление приложения скачано: ${version}`);
 }
 
 async function checkForAppUpdate() {
@@ -1129,8 +1128,58 @@ async function checkForAppUpdate() {
     return lastAppUpdate;
   }
 
-  await autoUpdater.checkForUpdates();
-  return lastAppUpdate;
+  lastAppUpdate = {
+    status: 'checking',
+    version: lastAppUpdate.version,
+    message: 'Проверяю обновления приложения...',
+    progress: 0
+  };
+  sendAppUpdateProgress();
+
+  try {
+    const localVersion = app.getVersion();
+    const latestVersion = await fetchLatestAppVersion();
+
+    if (compareVersions(localVersion, latestVersion) >= 0) {
+      lastAppUpdate = {
+        status: 'up-to-date',
+        version: localVersion,
+        message: `Приложение актуально (${localVersion})`,
+        progress: 0
+      };
+      sendAppUpdateProgress();
+      return lastAppUpdate;
+    }
+
+    lastAppUpdate = {
+      status: 'available',
+      version: latestVersion,
+      message: `Доступно обновление приложения ${latestVersion}`,
+      progress: 0
+    };
+    sendAppUpdateProgress();
+    pushNotification({
+      type: 'info',
+      title: 'Доступно обновление',
+      message: `Версия ${latestVersion} скачивается автоматически.`,
+      persistent: true,
+      action: 'app-update'
+    });
+    log(`Доступно обновление приложения: ${latestVersion}`);
+
+    await downloadAppUpdate(latestVersion);
+    return lastAppUpdate;
+  } catch (error) {
+    lastAppUpdate = {
+      status: 'error',
+      version: lastAppUpdate.version,
+      message: error.message || 'Ошибка проверки обновлений приложения',
+      progress: 0
+    };
+    sendAppUpdateProgress();
+    log(`Ошибка автообновления приложения: ${lastAppUpdate.message}`, 'error');
+    throw error;
+  }
 }
 
 function sendAppUpdateProgress() {
@@ -1562,7 +1611,7 @@ async function fetchJson(url) {
   return JSON.parse(await fetchText(url));
 }
 
-function downloadFile(url, target, redirects = 0) {
+function downloadFile(url, target, redirects = 0, onProgress = null) {
   return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     const file = fs.createWriteStream(target);
@@ -1571,7 +1620,7 @@ function downloadFile(url, target, redirects = 0) {
         file.close();
         fs.rmSync(target, { force: true });
         response.resume();
-        resolve(downloadFile(new URL(response.headers.location, url).toString(), target, redirects + 1));
+        resolve(downloadFile(new URL(response.headers.location, url).toString(), target, redirects + 1, onProgress));
         return;
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -1581,6 +1630,13 @@ function downloadFile(url, target, redirects = 0) {
         reject(new Error(`HTTP ${response.statusCode}`));
         return;
       }
+
+      const total = Number(response.headers['content-length'] || 0);
+      let loaded = 0;
+      response.on('data', (chunk) => {
+        loaded += chunk.length;
+        if (typeof onProgress === 'function') onProgress(loaded, total);
+      });
       response.pipe(file);
       file.on('finish', () => file.close(resolve));
     });
