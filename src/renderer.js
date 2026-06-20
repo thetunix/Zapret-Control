@@ -50,7 +50,7 @@ window.zapret.onUpdateProgress((update) => {
 });
 
 window.zapret.onAppUpdateProgress((appUpdate) => {
-  if (!state) return;
+  if (!state) state = {};
   state.appUpdate = appUpdate;
   renderAppUpdateBanner();
 });
