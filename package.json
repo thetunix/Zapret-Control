@@ -1,6 +1,6 @@
 {
   "name": "zapret-control-center",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "private": true,
   "author": "Zapret Team",
   "description": "Electron control center for Flowseal zapret-discord-youtube.",
@@ -10,6 +10,9 @@
     "start:admin": "electron . --admin",
     "build": "electron-builder"
   },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
   "devDependencies": {
     "electron": "^35.0.0",
     "electron-builder": "^26.15.3"
@@ -17,12 +20,20 @@
   "build": {
     "appId": "com.zapret-control-center",
     "productName": "Zapret Control Center",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "thetunix",
+        "repo": "Zapret-Control"
+      }
+    ],
     "win": {
       "target": ["nsis"]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "artifactName": "Zapret-Control-Center-Setup-${version}.${ext}"
   }
 }
