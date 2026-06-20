@@ -1670,12 +1670,14 @@ async function runElevatedServiceInstall(config) {
     'taskkill /IM winws.exe /F >nul 2>&1',
     'netsh interface tcp set global timestamps=enabled >nul 2>&1',
     `sc create ${SERVICE_NAME} binPath= "${binPathArg}" DisplayName= "${SERVICE_NAME}" start= auto`,
+    'if errorlevel 1 goto :failed',
     `sc description ${SERVICE_NAME} "Zapret DPI bypass software"`,
     `sc sdset ${SERVICE_NAME} "${SERVICE_SDDL}" >nul 2>&1`,
     `reg add "HKLM\\System\\CurrentControlSet\\Services\\${SERVICE_NAME}" /v zapret-discord-youtube /t REG_SZ /d "${configBaseName}" /f >nul`,
-    `sc start ${SERVICE_NAME}`
+    `sc start ${SERVICE_NAME}`,
+    'if errorlevel 1 goto :failed'
   ];
-  await runElevatedBatchScript(lines, 'install-service');
+  await runElevatedBatchScript(lines, 'install-service', { strict: false });
 }
 
 async function runElevatedServiceRemove() {
@@ -1688,10 +1690,11 @@ async function runElevatedServiceRemove() {
     'sc stop WinDivert14 >nul 2>&1',
     'sc delete WinDivert14 >nul 2>&1'
   ];
-  await runElevatedBatchScript(lines, 'remove-service');
+  await runElevatedBatchScript(lines, 'remove-service', { strict: false });
 }
 
-async function runElevatedBatchScript(lines, name) {
+async function runElevatedBatchScript(lines, name, options = {}) {
+  const strict = options.strict !== false;
   const dir = path.join(app.getPath('userData'), 'elevated');
   fs.mkdirSync(dir, { recursive: true });
   const stamp = Date.now();
@@ -1700,15 +1703,21 @@ async function runElevatedBatchScript(lines, name) {
   const scriptBody = [
     '@echo off',
     'chcp 437 >nul',
-    ...lines,
-    'if errorlevel 1 goto :failed',
+    ...lines
+  ];
+
+  if (strict) {
+    scriptBody.push('if errorlevel 1 goto :failed');
+  }
+
+  scriptBody.push(
     `echo OK>"${logPath}"`,
     'exit /b 0',
     ':failed',
     `echo FAILED %ERRORLEVEL%>"${logPath}"`,
     'exit /b %ERRORLEVEL%'
-  ].join('\r\n');
-  fs.writeFileSync(scriptPath, scriptBody, 'utf8');
+  );
+  fs.writeFileSync(scriptPath, scriptBody.join('\r\n'), 'utf8');
 
   const elevateExe = resolveElevateExe();
   let elevationError = null;
@@ -1746,7 +1755,13 @@ async function runElevatedBatchScript(lines, name) {
       if (code === '1223') {
         throw new Error('Запрос UAC был отклонён. Нажмите «Установить» ещё раз и подтвердите окно контроля учётных записей.');
       }
-      throw new Error(`Ошибка выполнения (код ${code || 'unknown'}). Убедитесь, что другой bypass не мешает установке службы.`);
+      if (code === '1060') {
+        throw new Error('Служба не найдена (код 1060). Попробуйте установить ещё раз — если ошибка повторится, перезапустите приложение от администратора.');
+      }
+      if (code === '1072') {
+        throw new Error('Служба помечена для удаления (код 1072). Подождите 10 секунд и нажмите «Установить» снова.');
+      }
+      throw new Error(`Ошибка установки службы (код ${code || 'unknown'}). Убедитесь, что другой bypass не мешает.`);
     }
 
     if (!detail && elevationError) {
