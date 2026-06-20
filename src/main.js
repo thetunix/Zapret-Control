@@ -1257,56 +1257,6 @@ function scoreTargets(targetResults) {
   };
 }
 
-async function installZapretService(configName) {
-  const admin = await isAdministrator();
-  if (!admin) throw new Error('Для установки службы нужны права администратора');
-
-  const config = parseConfig(configName);
-  await stopZapretProcesses({ stopService: true, quiet: true });
-  await execFileQuiet('sc.exe', ['delete', 'zapret'], 5000);
-  await enableTcpTimestamps();
-
-  await execFileAsync('sc.exe', [
-    'create',
-    'zapret',
-    'binPath=',
-    config.commandLine,
-    'DisplayName=',
-    'zapret',
-    'start=',
-    'auto'
-  ], { timeout: 10000 });
-  await execFileQuiet('sc.exe', ['description', 'zapret', 'Zapret DPI bypass software'], 5000);
-  await execFileQuiet('reg.exe', [
-    'add',
-    'HKLM\\System\\CurrentControlSet\\Services\\zapret',
-    '/v',
-    'zapret-discord-youtube',
-    '/t',
-    'REG_SZ',
-    '/d',
-    config.name.replace(/\.bat$/i, ''),
-    '/f'
-  ], 5000);
-  await execFileAsync('sc.exe', ['start', 'zapret'], { timeout: 10000 });
-  settings.bestConfig = config.name;
-  settings.selectedConfig = config.name;
-  saveSettings();
-  log(`Служба zapret установлена: ${config.name}`);
-}
-
-async function removeZapretService() {
-  const admin = await isAdministrator();
-  if (!admin) throw new Error('Для удаления службы нужны права администратора');
-  await execFileQuiet('sc.exe', ['stop', 'zapret'], 7000);
-  await execFileQuiet('sc.exe', ['delete', 'zapret'], 7000);
-  await execFileQuiet('sc.exe', ['stop', 'WinDivert'], 7000);
-  await execFileQuiet('sc.exe', ['delete', 'WinDivert'], 7000);
-  await execFileQuiet('sc.exe', ['stop', 'WinDivert14'], 7000);
-  await execFileQuiet('sc.exe', ['delete', 'WinDivert14'], 7000);
-  log('Служба zapret удалена');
-}
-
 function execFileAsync(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     execFile(command, args, {
@@ -1442,6 +1392,20 @@ function quotePowerShellSingle(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+function quoteBatchValue(value) {
+  return String(value).replace(/%/g, '%%').replace(/"/g, '""');
+}
+
+function formatServiceBinPath(config) {
+  const argsText = config.args.map(quoteCommandArg).join(' ');
+  return `"${config.exe}" ${argsText}`;
+}
+
+function formatServiceBinPathForBatch(config) {
+  const argsText = config.args.map(quoteCommandArg).join(' ');
+  return `\\"${quoteBatchValue(config.exe)}\\" ${argsText}`;
+}
+
 function quoteCommandArg(arg) {
   const value = String(arg);
   if (value === '') return '""';
@@ -1488,7 +1452,7 @@ async function installZapretService(configName) {
     'create',
     SERVICE_NAME,
     'binPath=',
-    config.commandLine,
+    formatServiceBinPath(config),
     'DisplayName=',
     SERVICE_NAME,
     'start=',
@@ -1536,63 +1500,79 @@ async function removeZapretService() {
 }
 
 async function runElevatedServiceInstall(config) {
-  const serviceKey = `HKLM:\\System\\CurrentControlSet\\Services\\${SERVICE_NAME}`;
-  const script = `
-$ErrorActionPreference = 'Stop'
-function Invoke-Native {
-  param([Parameter(Mandatory=$true)][string]$FilePath, [Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
-  & $FilePath @Arguments
-  if ($LASTEXITCODE -ne 0) {
-    throw "$FilePath failed with exit code $LASTEXITCODE"
-  }
-}
-sc.exe stop ${quotePowerShellSingle(SERVICE_NAME)} | Out-Null
-sc.exe delete ${quotePowerShellSingle(SERVICE_NAME)} | Out-Null
-Start-Sleep -Milliseconds 700
-Get-CimInstance Win32_Process -Filter "Name='winws.exe'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-Invoke-Native netsh.exe interface tcp set global timestamps=enabled
-Invoke-Native sc.exe create ${quotePowerShellSingle(SERVICE_NAME)} binPath= ${quotePowerShellSingle(config.commandLine)} DisplayName= ${quotePowerShellSingle(SERVICE_NAME)} start= auto
-Invoke-Native sc.exe description ${quotePowerShellSingle(SERVICE_NAME)} 'Zapret DPI bypass software'
-Invoke-Native sc.exe sdset ${quotePowerShellSingle(SERVICE_NAME)} ${quotePowerShellSingle(SERVICE_SDDL)}
-New-Item -Path ${quotePowerShellSingle(serviceKey)} -Force | Out-Null
-New-ItemProperty -Path ${quotePowerShellSingle(serviceKey)} -Name 'zapret-discord-youtube' -PropertyType String -Value ${quotePowerShellSingle(config.name.replace(/\.bat$/i, ''))} -Force | Out-Null
-Invoke-Native sc.exe start ${quotePowerShellSingle(SERVICE_NAME)}
-`;
-  await runElevatedPowerShellScript(script, 'install-service');
+  const configBaseName = quoteBatchValue(config.name.replace(/\.bat$/i, ''));
+  const binPathArg = formatServiceBinPathForBatch(config);
+  const lines = [
+    'sc stop zapret >nul 2>&1',
+    'sc delete zapret >nul 2>&1',
+    'ping -n 2 127.0.0.1 >nul',
+    'taskkill /IM winws.exe /F >nul 2>&1',
+    'netsh interface tcp set global timestamps=enabled >nul 2>&1',
+    `sc create ${SERVICE_NAME} binPath= "${binPathArg}" DisplayName= "${SERVICE_NAME}" start= auto`,
+    `sc description ${SERVICE_NAME} "Zapret DPI bypass software"`,
+    `sc sdset ${SERVICE_NAME} "${SERVICE_SDDL}" >nul 2>&1`,
+    `reg add "HKLM\\System\\CurrentControlSet\\Services\\${SERVICE_NAME}" /v zapret-discord-youtube /t REG_SZ /d "${configBaseName}" /f >nul`,
+    `sc start ${SERVICE_NAME}`
+  ];
+  await runElevatedBatchScript(lines, 'install-service');
 }
 
 async function runElevatedServiceRemove() {
-  const script = `
-$ErrorActionPreference = 'SilentlyContinue'
-sc.exe stop ${quotePowerShellSingle(SERVICE_NAME)} | Out-Null
-sc.exe delete ${quotePowerShellSingle(SERVICE_NAME)} | Out-Null
-sc.exe stop WinDivert | Out-Null
-sc.exe delete WinDivert | Out-Null
-sc.exe stop WinDivert14 | Out-Null
-sc.exe delete WinDivert14 | Out-Null
-`;
-  await runElevatedPowerShellScript(script, 'remove-service');
+  const lines = [
+    'sc stop zapret >nul 2>&1',
+    'sc delete zapret >nul 2>&1',
+    'taskkill /IM winws.exe /F >nul 2>&1',
+    'sc stop WinDivert >nul 2>&1',
+    'sc delete WinDivert >nul 2>&1',
+    'sc stop WinDivert14 >nul 2>&1',
+    'sc delete WinDivert14 >nul 2>&1'
+  ];
+  await runElevatedBatchScript(lines, 'remove-service');
 }
 
-async function runElevatedPowerShellScript(script, name) {
+async function runElevatedBatchScript(lines, name) {
   const dir = path.join(app.getPath('userData'), 'elevated');
   fs.mkdirSync(dir, { recursive: true });
-  const scriptPath = path.join(dir, `${name}-${Date.now()}.ps1`);
-  fs.writeFileSync(scriptPath, script.trim(), 'utf8');
+  const stamp = Date.now();
+  const scriptPath = path.join(dir, `${name}-${stamp}.cmd`);
+  const logPath = path.join(dir, `${name}-${stamp}.log`);
+  const scriptBody = [
+    '@echo off',
+    'chcp 437 >nul',
+    ...lines,
+    'if errorlevel 1 goto :failed',
+    `echo OK>"${logPath}"`,
+    'exit /b 0',
+    ':failed',
+    `echo FAILED %ERRORLEVEL%>"${logPath}"`,
+    'exit /b %ERRORLEVEL%'
+  ].join('\r\n');
+  fs.writeFileSync(scriptPath, scriptBody, 'utf8');
 
   const command = [
-    `$p = Start-Process -FilePath 'powershell.exe'`,
-    `-ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',${quotePowerShellSingle(scriptPath)})`,
+    `$p = Start-Process -FilePath 'cmd.exe'`,
+    `-ArgumentList '/c',${quotePowerShellSingle(scriptPath)}`,
     '-Verb RunAs -Wait -PassThru;',
+    'if ($null -eq $p) { exit 1223 }',
+    'if ($null -eq $p.ExitCode) { exit 1223 }',
     'exit $p.ExitCode'
   ].join(' ');
 
   try {
     await execFileAsync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], { timeout: 120000 });
   } catch (error) {
-    throw new Error(`Elevated action failed or was cancelled: ${error.message}`);
+    let detail = '';
+    try {
+      if (fs.existsSync(logPath)) detail = fs.readFileSync(logPath, 'utf8').trim();
+    } catch {}
+    const cancelled = /1223/.test(String(error.message)) || /1223/.test(detail);
+    if (cancelled) {
+      throw new Error('Действие отменено. Подтвердите запрос UAC.');
+    }
+    throw new Error(detail && !/^FAILED(\s|$)/.test(detail) ? `Не удалось выполнить действие: ${detail}` : `Не удалось выполнить действие с правами администратора: ${error.message}`);
   } finally {
     fs.rm(scriptPath, { force: true }, () => {});
+    fs.rm(logPath, { force: true }, () => {});
   }
 }
 
