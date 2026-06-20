@@ -1,6 +1,6 @@
 {
   "name": "zapret-control-center",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "author": "Zapret Team",
   "description": "Electron control center for Flowseal zapret-discord-youtube.",
