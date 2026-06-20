@@ -29,6 +29,7 @@ let settingsFile = null;
 let logFile = null;
 let recentLogs = [];
 let activeTest = null;
+let startZapretInFlight = null;
 let lastUpdate = {
   status: 'idle',
   localVersion: null,
@@ -103,7 +104,6 @@ async function bootstrap() {
   }
 
   ensureZapretFiles();
-  ensureUserLists();
   syncLoginItem();
   createWindow();
   writeStartupDebug('window created');
@@ -396,6 +396,7 @@ function ensureZapretFiles() {
   }
   fs.mkdirSync(listsDir, { recursive: true });
   fs.mkdirSync(utilsDir, { recursive: true });
+  ensureRequiredLists();
 }
 
 function ensureUserLists() {
@@ -408,6 +409,64 @@ function ensureUserLists() {
   for (const [name, content] of Object.entries(defaults)) {
     const file = path.join(listsDir, name);
     if (!fs.existsSync(file)) fs.writeFileSync(file, content, 'utf8');
+  }
+}
+
+function resolveListsSeedDir() {
+  const candidates = [
+    path.join(process.resourcesPath, 'zapret-seed', 'lists'),
+    path.join(__dirname, '..', 'zapret', 'lists')
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  return null;
+}
+
+function ensureRequiredLists() {
+  ensureUserLists();
+  fs.mkdirSync(listsDir, { recursive: true });
+
+  const seedDir = resolveListsSeedDir();
+  if (seedDir) {
+    for (const entry of fs.readdirSync(seedDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !/\.txt$/i.test(entry.name) || /-user\.txt$/i.test(entry.name)) continue;
+      const target = path.join(listsDir, entry.name);
+      if (!fs.existsSync(target)) {
+        fs.copyFileSync(path.join(seedDir, entry.name), target);
+        log(`Добавлен отсутствующий список: ${entry.name}`);
+      }
+    }
+  }
+
+  const fallbacks = {
+    'ipset-exclude.txt': [
+      '0.0.0.0/8',
+      '10.0.0.0/8',
+      '127.0.0.0/8',
+      '172.16.0.0/12',
+      '192.168.0.0/16',
+      '169.254.0.0/16',
+      '224.0.0.0/4',
+      '100.64.0.0/10',
+      '::1',
+      'fc00::/7',
+      'fe80::/10'
+    ].join('\r\n') + '\r\n',
+    'list-exclude.txt': 'domain.example.abc\r\n',
+    'list-general.txt': 'cloudflare-ech.com\r\n',
+    'list-google.txt': 'youtube.com\r\n',
+    'ipset-all.txt': '203.0.113.113/32\r\n'
+  };
+
+  for (const [name, content] of Object.entries(fallbacks)) {
+    const file = path.join(listsDir, name);
+    if (!fs.existsSync(file)) {
+      fs.writeFileSync(file, content, 'utf8');
+      log(`Создан базовый список: ${name}`);
+    }
   }
 }
 
@@ -617,8 +676,18 @@ function splitArgs(input) {
 }
 
 async function startZapret(configName, options = {}) {
+  if (startZapretInFlight) return startZapretInFlight;
+
+  startZapretInFlight = startZapretInner(configName, options).finally(() => {
+    startZapretInFlight = null;
+  });
+
+  return startZapretInFlight;
+}
+
+async function startZapretInner(configName, options = {}) {
   const config = parseConfig(configName || settings.selectedConfig);
-  ensureUserLists();
+  ensureRequiredLists();
 
   const service = await getServiceStatus();
   if (service.installed && options.useService !== false) {
@@ -628,8 +697,21 @@ async function startZapret(configName, options = {}) {
       return config;
     }
 
+    if (service.state === 'RUNNING') {
+      const running = await getWinwsStatus();
+      if (running.active) {
+        log(`Служба zapret уже работает: ${config.name}`);
+        if (options.remember !== false) {
+          settings.selectedConfig = config.name;
+          saveSettings();
+        }
+        await sendState();
+        return config;
+      }
+    }
+
     await stopZapretProcesses({ stopService: true, quiet: true, killProcesses: false });
-    log(`Starting zapret service: ${config.name}`);
+    log(`Запуск службы zapret: ${config.name}`);
     await execFileAsync('sc.exe', ['start', SERVICE_NAME], { timeout: 10000 });
 
     if (options.remember !== false) {
@@ -637,7 +719,12 @@ async function startZapret(configName, options = {}) {
       saveSettings();
     }
 
-    await delay(500);
+    await delay(1200);
+    const running = await getWinwsStatus();
+    if (!running.active) {
+      throw new Error('Служба запущена, но winws.exe не работает. Проверьте списки в zapret/lists и попробуйте другой конфиг.');
+    }
+
     await sendState();
     return config;
   }
@@ -857,7 +944,7 @@ function reacquireSingleInstanceLock() {
 }
 
 function readGeneralList() {
-  ensureUserLists();
+  ensureRequiredLists();
   const base = readDomainFile(path.join(listsDir, 'list-general.txt'));
   const user = readDomainFile(path.join(listsDir, 'list-general-user.txt'));
   return { base, user };
@@ -885,7 +972,7 @@ function normalizeDomain(domain) {
 }
 
 function addGeneralDomain(domain) {
-  ensureUserLists();
+  ensureRequiredLists();
   const normalized = normalizeDomain(domain);
   const list = readGeneralList().user;
   if (!list.includes(normalized)) list.push(normalized);
@@ -1096,7 +1183,7 @@ async function applyZapretUpdate(latestVersion) {
 
   backupZapretFiles();
   applyUpdateFiles(extractedRoot);
-  ensureUserLists();
+  ensureRequiredLists();
 
   lastUpdate = {
     status: 'updated',
@@ -1593,6 +1680,7 @@ function quoteCommandArg(arg) {
 }
 
 async function installZapretService(configName) {
+  ensureRequiredLists();
   const config = parseConfig(configName);
   const admin = await isAdministrator();
 
