@@ -49,6 +49,20 @@ window.zapret.onUpdateProgress((update) => {
   renderUpdate();
 });
 
+window.zapret.onAppUpdateProgress((appUpdate) => {
+  if (!state) return;
+  state.appUpdate = appUpdate;
+  renderAppUpdateBanner();
+});
+
+window.zapret.onNotification((payload) => {
+  showToast(payload.type || 'info', payload.message || '', {
+    title: payload.title,
+    duration: payload.persistent ? 0 : 7000,
+    action: payload.action
+  });
+});
+
 window.zapret.onTestsStart((info) => {
   testRunning = true;
   $('#testResults').innerHTML = '';
@@ -153,8 +167,19 @@ function bindControls() {
     await refreshLogs();
   });
 
-  $('#installServiceBtn').addEventListener('click', async () => action(() => window.zapret.installService($('#configSelect').value)));
-  $('#removeServiceBtn').addEventListener('click', async () => action(() => window.zapret.removeService()));
+  $('#installServiceBtn').addEventListener('click', async () => {
+    showToast('info', 'Сейчас появится запрос UAC Windows. Подтвердите его — окно может быть за другими программами.', {
+      title: 'Установка службы',
+      duration: 9000
+    });
+    await action(() => window.zapret.installService($('#configSelect').value), {
+      successMessage: 'Служба Windows установлена'
+    });
+  });
+  $('#removeServiceBtn').addEventListener('click', async () => {
+    showToast('info', 'Подтвердите запрос UAC для удаления службы.', { title: 'Удаление службы', duration: 7000 });
+    await action(() => window.zapret.removeService(), { successMessage: 'Служба Windows удалена' });
+  });
 
   $('#gameFilterGroup').addEventListener('click', async (event) => {
     const button = event.target.closest('button[data-mode]');
@@ -184,15 +209,49 @@ function renderState() {
   $('#startBtn').classList.toggle('online', state.running.active);
   $('#startBtn').setAttribute('aria-label', state.running.active ? 'Остановить zapret' : 'Включить zapret');
   $('#bestConfig').textContent = state.settings.bestConfig || 'не выбран';
-  $('#serviceState').textContent = state.service.installed ? state.service.state : 'нет';
+  $('#serviceState').textContent = formatServiceState(state.service, 'short');
   $('#versionState').textContent = state.versions.local || 'n/a';
   $('#adminLabel').textContent = state.admin ? 'Админ: да' : 'Админ: нет';
-  $('#serviceNotice').textContent = state.service.installed ? `Служба: ${state.service.state}` : 'Служба не установлена';
+
+  const serviceNotice = $('#serviceNotice');
+  serviceNotice.textContent = formatServiceState(state.service, 'long');
+  serviceNotice.classList.toggle('notice-good', state.service.installed && state.service.state === 'RUNNING');
+  serviceNotice.classList.toggle('notice-warn', state.service.installed && state.service.state !== 'RUNNING');
 
   renderConfigSelect();
   renderSettings();
   renderUpdate();
+  renderAppUpdateBanner();
   renderThemes();
+}
+
+function formatServiceState(service, mode = 'short') {
+  if (!service?.installed) {
+    return mode === 'long' ? 'Служба Windows не установлена' : 'нет';
+  }
+
+  const labels = {
+    RUNNING: 'работает',
+    STOPPED: 'остановлена',
+    START_PENDING: 'запускается',
+    STOP_PENDING: 'останавливается',
+    PAUSE_PENDING: 'пауза...',
+    PAUSED: 'на паузе',
+    CONTINUE_PENDING: 'возобновляется',
+    UNKNOWN: 'неизвестно',
+    NOT_INSTALLED: 'нет'
+  };
+
+  const label = labels[service.state] || String(service.state || 'неизвестно').toLowerCase();
+  const configLabel = service.configName ? service.configName.replace(/\.bat$/i, '') : null;
+
+  if (mode === 'long') {
+    if (configLabel) return `Служба ${label} · конфиг ${configLabel}`;
+    return `Служба ${label}`;
+  }
+
+  if (configLabel && service.state === 'RUNNING') return `${label}`;
+  return label;
 }
 
 function renderProcessNote(running) {
@@ -239,7 +298,103 @@ function renderSettings() {
 function renderUpdate() {
   const update = state?.update;
   if (!update) return;
-  $('#updateNotice').textContent = update.message || '...';
+  const notice = $('#updateNotice');
+  if (!notice) return;
+  notice.textContent = update.message || '...';
+  notice.classList.toggle('notice-good', update.status === 'current' || update.status === 'updated');
+  notice.classList.toggle('notice-warn', update.status === 'available' || update.status === 'downloading' || update.status === 'installing');
+}
+
+function renderAppUpdateBanner() {
+  const container = $('#appBanners');
+  if (!container) return;
+
+  const appUpdate = state?.appUpdate;
+  const active = appUpdate && ['available', 'downloading', 'downloaded'].includes(appUpdate.status);
+  container.innerHTML = '';
+
+  if (!active) return;
+
+  const banner = document.createElement('div');
+  banner.className = `app-banner app-banner-${appUpdate.status}`;
+
+  const text = document.createElement('div');
+  text.className = 'app-banner-text';
+  text.innerHTML = `
+    <strong>${escapeHtml(appUpdate.status === 'downloaded' ? 'Обновление готово' : 'Доступно обновление')}</strong>
+    <span>${escapeHtml(appUpdate.message || '')}</span>
+  `;
+
+  const actions = document.createElement('div');
+  actions.className = 'app-banner-actions';
+
+  if (appUpdate.status === 'downloaded') {
+    const installBtn = document.createElement('button');
+    installBtn.className = 'primary-button';
+    installBtn.textContent = 'Установить';
+    installBtn.addEventListener('click', () => action(() => window.zapret.installAppUpdate(), {
+      successMessage: 'Приложение перезапустится для установки обновления'
+    }));
+    actions.appendChild(installBtn);
+  } else if (appUpdate.status === 'downloading') {
+    const progress = document.createElement('div');
+    progress.className = 'app-banner-progress';
+    progress.innerHTML = `<span style="width:${Math.round(appUpdate.progress || 0)}%"></span>`;
+    actions.appendChild(progress);
+  }
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.className = 'ghost-button app-banner-dismiss';
+  dismissBtn.textContent = '×';
+  dismissBtn.setAttribute('aria-label', 'Скрыть');
+  dismissBtn.addEventListener('click', () => {
+    banner.classList.add('hidden');
+    setTimeout(() => banner.remove(), 220);
+  });
+
+  banner.appendChild(text);
+  banner.appendChild(actions);
+  banner.appendChild(dismissBtn);
+  container.appendChild(banner);
+}
+
+function showToast(type, message, options = {}) {
+  const stack = $('#toastStack');
+  if (!stack || !message) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}${options.action ? ' toast-actionable' : ''}`;
+
+  const titleHtml = options.title ? `<strong>${escapeHtml(options.title)}</strong>` : '';
+  toast.innerHTML = `${titleHtml}<p>${escapeHtml(message)}</p>`;
+
+  if (options.action === 'app-update') {
+    const btn = document.createElement('button');
+    btn.className = 'toast-action';
+    btn.textContent = 'Установить';
+    btn.addEventListener('click', () => action(() => window.zapret.installAppUpdate()));
+    toast.appendChild(btn);
+  }
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'toast-close';
+  closeBtn.textContent = '×';
+  closeBtn.setAttribute('aria-label', 'Закрыть');
+  closeBtn.addEventListener('click', () => dismissToast(toast));
+  toast.appendChild(closeBtn);
+
+  stack.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('visible'));
+
+  if (options.duration !== 0) {
+    setTimeout(() => dismissToast(toast), options.duration || 6500);
+  }
+}
+
+function dismissToast(toast) {
+  if (!toast || !toast.isConnected) return;
+  toast.classList.remove('visible');
+  setTimeout(() => toast.remove(), 260);
 }
 
 function renderThemes() {
@@ -351,15 +506,18 @@ async function patchSetting(patch) {
   renderState();
 }
 
-async function action(fn) {
+async function action(fn, options = {}) {
   try {
     const result = await fn();
     if (result && typeof result === 'object' && result.settings) {
       state = result;
       renderState();
     }
+    if (options.successMessage) {
+      showToast('success', options.successMessage, { title: 'Готово' });
+    }
   } catch (error) {
-    alert(error.message || String(error));
+    showToast('error', error.message || String(error), { title: 'Ошибка', duration: 9000 });
   }
 }
 

@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('zapret', {
 
   checkUpdates: (options) => invoke('updates:check', options),
   openRelease: () => invoke('updates:openRelease'),
+  checkAppUpdate: () => invoke('app-update:check'),
+  installAppUpdate: () => invoke('app-update:install'),
 
   startTests: (options) => invoke('tests:start', options),
   cancelTests: () => invoke('tests:cancel'),
@@ -41,6 +43,8 @@ contextBridge.exposeInMainWorld('zapret', {
   onLog: (callback) => listen('log:new', callback),
   onLogCleared: (callback) => listen('log:cleared', callback),
   onUpdateProgress: (callback) => listen('update:progress', callback),
+  onAppUpdateProgress: (callback) => listen('app-update:progress', callback),
+  onNotification: (callback) => listen('notification:push', callback),
   onTestsStart: (callback) => listen('tests:start', callback),
   onTestsProgress: (callback) => listen('tests:progress', callback),
   onTestsTarget: (callback) => listen('tests:target', callback),

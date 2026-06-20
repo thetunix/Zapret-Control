@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const https = require('node:https');
@@ -33,6 +34,12 @@ let lastUpdate = {
   localVersion: null,
   latestVersion: null,
   message: 'Проверка ещё не запускалась'
+};
+let lastAppUpdate = {
+  status: 'idle',
+  version: null,
+  message: 'Проверка обновлений приложения ещё не запускалась',
+  progress: 0
 };
 
 const defaultSettings = {
@@ -103,6 +110,7 @@ async function bootstrap() {
   createTray();
   writeStartupDebug('tray created');
   registerIpc();
+  setupAppUpdater();
   log(`Приложение запущено. Корень zapret: ${rootDir}`);
   const runningAtLaunch = await getWinwsStatus();
   if (runningAtLaunch.active) {
@@ -295,6 +303,19 @@ function registerIpc() {
   });
   ipcMain.handle('updates:openRelease', () => shell.openExternal(`https://github.com/${UPDATE_REPO}/releases/latest`));
 
+  ipcMain.handle('app-update:check', async () => {
+    await checkForAppUpdate();
+    return buildState();
+  });
+  ipcMain.handle('app-update:install', () => {
+    if (lastAppUpdate.status !== 'downloaded') {
+      throw new Error('Обновление ещё не скачано');
+    }
+    isQuitting = true;
+    autoUpdater.quitAndInstall(false, true);
+    return true;
+  });
+
   ipcMain.handle('tests:start', async (_event, options) => {
     if (activeTest) throw new Error('Тест уже запущен');
     runConfigTests(options || {}).catch((error) => {
@@ -399,6 +420,7 @@ async function buildState() {
 
   return {
     appName: APP_NAME,
+    appVersion: app.getVersion(),
     rootDir,
     winwsExe,
     settings,
@@ -411,6 +433,7 @@ async function buildState() {
       latest: lastUpdate.latestVersion
     },
     update: lastUpdate,
+    appUpdate: lastAppUpdate,
     logs: recentLogs.slice(-160)
   };
 }
@@ -739,12 +762,34 @@ async function isAdministrator() {
 async function getServiceStatus() {
   try {
     const { stdout } = await execFileAsync('sc.exe', ['query', SERVICE_NAME], { timeout: 5000 });
-    const state = stdout.match(/STATE\s*:\s*\d+\s+([A-Z_]+)/i)?.[1] || 'UNKNOWN';
+    const state = parseServiceState(stdout);
     const configName = await readServiceConfigName();
     return { installed: true, state, configName };
   } catch {
     return { installed: false, state: 'NOT_INSTALLED', configName: null };
   }
+}
+
+function parseServiceState(stdout) {
+  const text = String(stdout || '');
+  const states = [
+    'RUNNING',
+    'STOPPED',
+    'START_PENDING',
+    'STOP_PENDING',
+    'PAUSE_PENDING',
+    'PAUSED',
+    'CONTINUE_PENDING'
+  ];
+
+  for (const state of states) {
+    if (new RegExp(`\\b${state}\\b`, 'i').test(text)) return state;
+  }
+
+  const numeric = text.match(/:\s*(\d+)\s+([A-Z_]+)/i);
+  if (numeric?.[2]) return numeric[2].toUpperCase();
+
+  return 'UNKNOWN';
 }
 
 async function readServiceConfigName() {
@@ -892,6 +937,122 @@ async function checkForZapretUpdate(options = {}) {
 
   await sendState();
   return lastUpdate;
+}
+
+function setupAppUpdater() {
+  if (!app.isPackaged) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = false;
+
+  autoUpdater.on('checking-for-update', () => {
+    lastAppUpdate = {
+      status: 'checking',
+      version: lastAppUpdate.version,
+      message: 'Проверяю обновления приложения...',
+      progress: 0
+    };
+    sendAppUpdateProgress();
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    lastAppUpdate = {
+      status: 'available',
+      version: info.version,
+      message: `Доступно обновление приложения ${info.version}`,
+      progress: 0
+    };
+    sendAppUpdateProgress();
+    pushNotification({
+      type: 'info',
+      title: 'Доступно обновление',
+      message: `Версия ${info.version} скачивается автоматически.`,
+      persistent: true,
+      action: 'app-update'
+    });
+    log(`Доступно обновление приложения: ${info.version}`);
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    const percent = Math.max(0, Math.min(100, Math.round(progress.percent || 0)));
+    lastAppUpdate = {
+      status: 'downloading',
+      version: lastAppUpdate.version,
+      message: `Скачиваю обновление ${percent}%`,
+      progress: percent
+    };
+    sendAppUpdateProgress();
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    lastAppUpdate = {
+      status: 'downloaded',
+      version: info.version,
+      message: `Обновление ${info.version} готово к установке`,
+      progress: 100
+    };
+    sendAppUpdateProgress();
+    pushNotification({
+      type: 'success',
+      title: 'Обновление готово',
+      message: `Версия ${info.version} скачана. Нажмите «Установить», чтобы обновить приложение.`,
+      persistent: true,
+      action: 'app-update'
+    });
+    log(`Обновление приложения скачано: ${info.version}`);
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    lastAppUpdate = {
+      status: 'up-to-date',
+      version: app.getVersion(),
+      message: `Приложение актуально (${app.getVersion()})`,
+      progress: 0
+    };
+    sendAppUpdateProgress();
+  });
+
+  autoUpdater.on('error', (error) => {
+    lastAppUpdate = {
+      status: 'error',
+      version: lastAppUpdate.version,
+      message: error?.message || 'Ошибка проверки обновлений приложения',
+      progress: 0
+    };
+    sendAppUpdateProgress();
+    log(`Ошибка автообновления приложения: ${lastAppUpdate.message}`, 'error');
+  });
+
+  setTimeout(() => {
+    checkForAppUpdate().catch((error) => {
+      log(`Не удалось проверить обновление приложения: ${error.message}`, 'error');
+    });
+  }, 2500);
+}
+
+async function checkForAppUpdate() {
+  if (!app.isPackaged) {
+    lastAppUpdate = {
+      status: 'dev',
+      version: app.getVersion(),
+      message: 'Автообновление приложения доступно только в установленной версии',
+      progress: 0
+    };
+    sendAppUpdateProgress();
+    return lastAppUpdate;
+  }
+
+  await autoUpdater.checkForUpdates();
+  return lastAppUpdate;
+}
+
+function sendAppUpdateProgress() {
+  send('app-update:progress', lastAppUpdate);
+  sendState().catch(() => {});
+}
+
+function pushNotification(payload) {
+  send('notification:push', payload);
 }
 
 async function applyZapretUpdate(latestVersion) {
@@ -1549,31 +1710,70 @@ async function runElevatedBatchScript(lines, name) {
   ].join('\r\n');
   fs.writeFileSync(scriptPath, scriptBody, 'utf8');
 
-  const command = [
-    `$p = Start-Process -FilePath 'cmd.exe'`,
-    `-ArgumentList '/c',${quotePowerShellSingle(scriptPath)}`,
-    '-Verb RunAs -Wait -PassThru;',
-    'if ($null -eq $p) { exit 1223 }',
-    'if ($null -eq $p.ExitCode) { exit 1223 }',
-    'exit $p.ExitCode'
-  ].join(' ');
+  const elevateExe = resolveElevateExe();
+  let elevationError = null;
 
   try {
-    await execFileAsync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], { timeout: 120000 });
-  } catch (error) {
-    let detail = '';
-    try {
-      if (fs.existsSync(logPath)) detail = fs.readFileSync(logPath, 'utf8').trim();
-    } catch {}
-    const cancelled = /1223/.test(String(error.message)) || /1223/.test(detail);
-    if (cancelled) {
-      throw new Error('Действие отменено. Подтвердите запрос UAC.');
+    if (elevateExe) {
+      await execFileAsync(elevateExe, ['-wait', 'cmd', '/c', scriptPath], { timeout: 120000 });
+    } else {
+      const command = [
+        `$p = Start-Process -FilePath 'cmd.exe'`,
+        `-ArgumentList '/c',${quotePowerShellSingle(scriptPath)}`,
+        '-Verb RunAs -WindowStyle Normal -Wait -PassThru;',
+        'if ($null -eq $p) { exit 1223 }',
+        'if ($null -eq $p.ExitCode) { exit 0 }',
+        'exit $p.ExitCode'
+      ].join(' ');
+      await execFileAsync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], { timeout: 120000 });
     }
-    throw new Error(detail && !/^FAILED(\s|$)/.test(detail) ? `Не удалось выполнить действие: ${detail}` : `Не удалось выполнить действие с правами администратора: ${error.message}`);
+  } catch (error) {
+    elevationError = error;
+  }
+
+  await delay(250);
+
+  let detail = '';
+  try {
+    if (fs.existsSync(logPath)) detail = fs.readFileSync(logPath, 'utf8').trim();
+  } catch {}
+
+  try {
+    if (detail === 'OK') return;
+
+    if (detail.startsWith('FAILED')) {
+      const code = detail.replace(/^FAILED\s*/, '').trim();
+      if (code === '1223') {
+        throw new Error('Запрос UAC был отклонён. Нажмите «Установить» ещё раз и подтвердите окно контроля учётных записей.');
+      }
+      throw new Error(`Ошибка выполнения (код ${code || 'unknown'}). Убедитесь, что другой bypass не мешает установке службы.`);
+    }
+
+    if (!detail && elevationError) {
+      const msg = String(elevationError.message || '');
+      if (/1223|canceled|cancelled|operation was canceled|отмен/i.test(msg)) {
+        throw new Error('Запрос UAC не выполнен. Подтвердите окно «Разрешить этому приложению вносить изменения?» — оно может быть за другими окнами.');
+      }
+    }
+
+    throw new Error('Не удалось выполнить действие с правами администратора. Подтвердите UAC или запустите приложение от администратора.');
   } finally {
     fs.rm(scriptPath, { force: true }, () => {});
     fs.rm(logPath, { force: true }, () => {});
   }
+}
+
+function resolveElevateExe() {
+  const candidates = [
+    path.join(process.resourcesPath, 'elevate.exe'),
+    path.join(__dirname, '..', 'node_modules', 'app-builder-lib', 'templates', 'nsis', 'elevate.exe')
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  return null;
 }
 
 function delay(ms) {

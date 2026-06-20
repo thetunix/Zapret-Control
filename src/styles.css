@@ -421,6 +421,145 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 }
 
 .notice { margin-top: 12px; line-height: 1.5; font-size: 12.5px; }
+.notice-good { color: var(--good); }
+.notice-warn { color: var(--warn); }
+
+.app-banners {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  width: min(760px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.app-banner {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
+  box-shadow: 0 18px 48px var(--shadow-soft);
+  pointer-events: auto;
+  animation: bannerIn 0.35s var(--ease);
+}
+
+.app-banner.hidden { opacity: 0; transform: translateY(-8px); transition: opacity 0.22s var(--ease), transform 0.22s var(--ease); }
+
+.app-banner-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.app-banner-text strong { font-size: 14px; color: var(--text); }
+.app-banner-text span { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+.app-banner-actions { display: flex; align-items: center; gap: 10px; }
+.app-banner-actions .primary-button { padding: 8px 14px; font-size: 12.5px; white-space: nowrap; }
+
+.app-banner-progress {
+  width: 120px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.app-banner-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.25s var(--ease);
+}
+
+.app-banner-dismiss {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.app-banner-downloaded {
+  border-color: color-mix(in srgb, var(--good) 40%, var(--line));
+  background: color-mix(in srgb, var(--good) 10%, var(--surface-2));
+}
+
+.toast-stack {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(380px, calc(100vw - 36px));
+  pointer-events: none;
+}
+
+.toast {
+  position: relative;
+  padding: 14px 42px 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+  backdrop-filter: blur(calc(var(--glass-blur) + 2px));
+  box-shadow: 0 16px 40px var(--shadow-soft);
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(-10px) scale(0.98);
+  transition: opacity 0.24s var(--ease), transform 0.24s var(--ease);
+}
+
+.toast.visible { opacity: 1; transform: translateY(0) scale(1); }
+.toast strong { display: block; font-size: 13px; margin-bottom: 4px; color: var(--text); }
+.toast p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+
+.toast-info { border-color: color-mix(in srgb, var(--accent-3) 35%, var(--line)); }
+.toast-success { border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
+.toast-error { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.toast-error strong { color: #ffb4b4; }
+
+.toast-action {
+  margin-top: 10px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--good) 45%, var(--line));
+  background: color-mix(in srgb, var(--good) 16%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.toast-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+@keyframes bannerIn {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 720px) {
+  .app-banner { grid-template-columns: 1fr auto; }
+  .app-banner-dismiss { grid-column: 2; grid-row: 1 / span 2; }
+  .app-banner-actions { grid-column: 1 / span 2; justify-content: flex-start; }
+}
 
 /* ---------------------------------------------------------------------
    Logs
