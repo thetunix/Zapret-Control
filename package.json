@@ -1,6 +1,6 @@
 {
   "name": "zapret-control-center",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "author": "Zapret Team",
   "description": "Electron control center for Flowseal zapret-discord-youtube.",
@@ -34,6 +34,23 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },
-    "artifactName": "Zapret-Control-Center-Setup-${version}.${ext}"
+    "artifactName": "Zapret-Control-Center-Setup-${version}.${ext}",
+    "extraFiles": [
+      {
+        "from": "zapret",
+        "to": "zapret",
+        "filter": [
+          "**/*",
+          "!.zapret-backups/**"
+        ]
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "zapret/lists",
+        "to": "zapret-seed/lists",
+        "filter": ["**/*", "!**/*.backup"]
+      }
+    ]
   }
 }
