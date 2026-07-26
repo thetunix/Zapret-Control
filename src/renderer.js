@@ -7,12 +7,38 @@ const themes = [
   { id: 'orchid', name: 'Orchid', hint: 'soft purple' },
   { id: 'forest', name: 'Forest', hint: 'green gold' },
   { id: 'ruby', name: 'Ruby', hint: 'rose cyan' },
-  { id: 'noir', name: 'Noir', hint: 'mono mint' }
+  { id: 'noir', name: 'Noir', hint: 'mono mint' },
+  { id: 'midnight', name: 'Midnight', hint: 'deep blue' },
+  { id: 'sunset', name: 'Sunset', hint: 'coral pink' },
+  { id: 'matrix', name: 'Matrix', hint: 'neon green' },
+  { id: 'cyber', name: 'Cyberpunk', hint: 'yellow magenta' },
+  { id: 'sakura', name: 'Sakura', hint: 'pink violet' },
+  { id: 'mocha', name: 'Mocha', hint: 'coffee cream' },
+  { id: 'nord', name: 'Nord', hint: 'cold steel' },
+  { id: 'dracula', name: 'Dracula', hint: 'purple pink' },
+  { id: 'gold', name: 'Gold', hint: 'black gold' },
+  { id: 'ocean', name: 'Ocean', hint: 'blue teal' },
+  { id: 'custom', name: 'Своя', hint: 'настраивается ниже' }
 ];
+
+const defaultCustomTheme = {
+  accent: '#7c5cff',
+  accent2: '#32d6c8',
+  accent3: '#5b7bff',
+  bg: '#0b0b0f'
+};
+
+const LOG_LIMIT = 200;
+const LOG_ROWS_VISIBLE = 120;
+const TOAST_LIMIT = 4;
 
 let state = null;
 let logs = [];
 let testRunning = false;
+let renderQueued = false;
+let logsRenderQueued = false;
+let metricsTimer = null;
+let logSeq = 0;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -20,28 +46,87 @@ const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 document.addEventListener('DOMContentLoaded', async () => {
   bindTabs();
   bindControls();
-  renderThemes();
-  await refreshState();
+  bindPowerSaving();
+  initThemes();
+  await refreshState(true);
   await refreshGeneralList();
   await refreshLogs();
-  setInterval(refreshState, 3000);
 });
 
 window.zapret.onState((nextState) => {
   state = nextState;
-  renderState();
+  scheduleRender();
 });
 
 window.zapret.onLog((entry) => {
-  logs.push(entry);
-  logs = logs.slice(-500);
-  renderLogs();
+  logs.push(withSeq(entry));
+  if (logs.length > LOG_LIMIT) logs = logs.slice(-LOG_LIMIT);
+  scheduleLogsRender();
 });
 
 window.zapret.onLogCleared(() => {
   logs = [];
-  renderLogs();
+  const preview = $('#homeLogs');
+  if (preview) {
+    preview.textContent = '';
+    preview.dataset.lastSeq = '0';
+  }
 });
+
+function withSeq(entry) {
+  logSeq += 1;
+  entry.seq = logSeq;
+  return entry;
+}
+
+// Пока окно скрыто или свёрнуто, рендерить нечего — копим и рисуем один раз при возврате.
+function scheduleRender() {
+  if (document.hidden) {
+    renderQueued = true;
+    return;
+  }
+  renderState();
+}
+
+function scheduleLogsRender() {
+  if (document.hidden || logsRenderQueued) {
+    logsRenderQueued = true;
+    return;
+  }
+  logsRenderQueued = true;
+  requestAnimationFrame(() => {
+    logsRenderQueued = false;
+    if (!document.hidden) renderLogs();
+  });
+}
+
+function bindPowerSaving() {
+  const syncMotion = () => {
+    const idle = document.hidden || !document.hasFocus();
+    document.body.classList.toggle('motion-idle', idle);
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    syncMotion();
+    if (document.hidden) {
+      stopMetricsTimer();
+      return;
+    }
+    if (renderQueued) {
+      renderQueued = false;
+      renderState();
+    }
+    if (logsRenderQueued) {
+      logsRenderQueued = false;
+      renderLogs();
+    }
+    refreshState().catch(() => {});
+  });
+
+  window.addEventListener('focus', syncMotion);
+  window.addEventListener('blur', syncMotion);
+  syncMotion();
+}
 
 window.zapret.onUpdateProgress((update) => {
   if (!state) return;
@@ -53,6 +138,7 @@ window.zapret.onAppUpdateProgress((appUpdate) => {
   if (!state) state = {};
   state.appUpdate = appUpdate;
   renderAppUpdateBanner();
+  renderAppUpdateSettings();
 });
 
 window.zapret.onNotification((payload) => {
@@ -107,8 +193,43 @@ function bindTabs() {
       button.classList.add('active');
       $(`#tab-${button.dataset.tab}`).classList.add('active');
       if (button.dataset.tab === 'logs') refreshLogs();
+      if (button.dataset.tab === 'settings') startMetricsTimer();
+      else stopMetricsTimer();
     });
   });
+}
+
+function startMetricsTimer() {
+  refreshMetrics();
+  if (metricsTimer) return;
+  metricsTimer = setInterval(() => {
+    if (document.hidden) return;
+    refreshMetrics();
+  }, 5000);
+}
+
+function stopMetricsTimer() {
+  if (!metricsTimer) return;
+  clearInterval(metricsTimer);
+  metricsTimer = null;
+}
+
+async function refreshMetrics() {
+  const target = $('#memoryState');
+  if (!target) return;
+
+  try {
+    const metrics = await window.zapret.getMetrics();
+    target.textContent = `${metrics.totalMb} МБ`;
+    const notice = $('#memoryNotice');
+    if (notice) {
+      notice.textContent = metrics.windowLoaded
+        ? `Фон: ${metrics.mainMb} МБ · интерфейс: ${metrics.rendererMb} МБ · опрос каждые ${Math.round(metrics.pollIntervalMs / 1000)} с`
+        : `Интерфейс выгружен, фон: ${metrics.mainMb} МБ`;
+    }
+  } catch {
+    target.textContent = 'н/д';
+  }
 }
 
 function bindControls() {
@@ -132,9 +253,34 @@ function bindControls() {
   });
 
   $('#launchAtLoginToggle').addEventListener('change', (event) => patchSetting({ launchAtLogin: event.target.checked }));
+  $('#unloadWindowToggle')?.addEventListener('change', (event) => patchSetting({ unloadWindowInTray: event.target.checked }));
+  $('#ecoModeToggle')?.addEventListener('change', (event) => patchSetting({ ecoMode: event.target.checked }));
+  $('#disableGpuToggle')?.addEventListener('change', async (event) => {
+    await patchSetting({ disableGpu: event.target.checked });
+    showToast('info', 'Настройка применится после перезапуска приложения', { title: 'Аппаратное ускорение' });
+  });
+  $('#startMinimizedToggle')?.addEventListener('change', (event) => patchSetting({ startMinimized: event.target.checked }));
+  $('#watchdogToggle')?.addEventListener('change', (event) => patchSetting({ watchdog: event.target.checked }));
+  $('#hotkeyToggle')?.addEventListener('change', (event) => patchSetting({ toggleHotkey: event.target.checked }));
+  $('#unloadWindowBtn')?.addEventListener('click', () => window.zapret.unloadWindow());
   $('#autoStartToggle').addEventListener('change', (event) => patchSetting({ autoStartZapret: event.target.checked }));
   $('#autoUpdateToggle').addEventListener('change', (event) => patchSetting({ autoUpdateZapret: event.target.checked }));
   $('#checkUpdateBtn').addEventListener('click', async () => action(() => window.zapret.checkUpdates({ apply: true })));
+  $('#checkAppUpdateBtn')?.addEventListener('click', async () => {
+    try {
+      const result = await window.zapret.checkAppUpdate();
+      state = result;
+      renderState();
+      if (result.appUpdate?.status === 'up-to-date') {
+        showToast('success', result.appUpdate.message, { title: 'Обновления' });
+      } else if (result.appUpdate?.status === 'downloaded') {
+        showToast('success', 'Обновление скачано — нажмите «Установить»', { title: 'Готово' });
+      }
+    } catch (error) {
+      showToast('error', error.message || String(error), { title: 'Ошибка обновления', duration: 9000 });
+    }
+  });
+  $('#installAppUpdateBtn')?.addEventListener('click', async () => action(() => window.zapret.installAppUpdate()));
   $('#openReleaseBtn').addEventListener('click', () => window.zapret.openRelease());
   bindRange('#ambientIntensityRange', 'ambientIntensity');
   bindRange('#glassBlurRange', 'glassBlur');
@@ -181,6 +327,33 @@ function bindControls() {
     await action(() => window.zapret.removeService(), { successMessage: 'Служба Windows удалена' });
   });
 
+  ['#customAccent', '#customAccent2', '#customAccent3', '#customBg'].forEach((selector) => {
+    $(selector)?.addEventListener('input', () => {
+      applyCustomTheme(readCustomThemeInputs());
+      document.body.dataset.theme = 'custom';
+    });
+  });
+
+  $('#applyCustomThemeBtn')?.addEventListener('click', async () => {
+    const customTheme = readCustomThemeInputs();
+    applyCustomTheme(customTheme);
+    document.body.dataset.theme = 'custom';
+    await patchSetting({ theme: 'custom', customTheme });
+    showToast('success', 'Своя тема применена', { title: 'Темы', duration: 4000 });
+  });
+
+  $('#randomCustomThemeBtn')?.addEventListener('click', async () => {
+    const customTheme = {
+      accent: randomHexColor(55, 70),
+      accent2: randomHexColor(60, 78),
+      accent3: randomHexColor(50, 68),
+      bg: randomHexColor(4, 9)
+    };
+    applyCustomTheme(customTheme);
+    document.body.dataset.theme = 'custom';
+    await patchSetting({ theme: 'custom', customTheme });
+  });
+
   $('#gameFilterGroup').addEventListener('click', async (event) => {
     const button = event.target.closest('button[data-mode]');
     if (!button) return;
@@ -188,17 +361,20 @@ function bindControls() {
   });
 }
 
-async function refreshState() {
+async function refreshState(initial = false) {
   state = await window.zapret.getState();
-  logs = state.logs || logs;
+  if (initial) {
+    logs = (state.logs || []).slice(-LOG_LIMIT).map(withSeq);
+    renderLogs();
+  }
   renderState();
-  renderLogs();
 }
 
 function renderState() {
   if (!state) return;
 
   document.body.dataset.theme = state.settings.theme || 'aurora';
+  applyCustomTheme();
   applyVisualSettings();
   $('#rootPath').textContent = state.rootDir;
   const adopted = state.running.active && state.running.externalCount > 0 && state.running.managedCount === 0;
@@ -222,7 +398,8 @@ function renderState() {
   renderSettings();
   renderUpdate();
   renderAppUpdateBanner();
-  renderThemes();
+  renderAppUpdateSettings();
+  updateThemeSelection();
 }
 
 function formatServiceState(service, mode = 'short') {
@@ -268,22 +445,49 @@ function renderProcessNote(running) {
 
 function renderConfigSelect() {
   const select = $('#configSelect');
-  const current = select.value;
   const selected = state.settings.selectedConfig || state.settings.bestConfig;
-  select.innerHTML = '';
-  for (const config of state.configs) {
-    const option = document.createElement('option');
-    option.value = config.name;
-    option.textContent = config.label;
-    select.appendChild(option);
+  const signature = state.configs.map((item) => item.name).join('|');
+
+  if (select.dataset.signature !== signature) {
+    const current = select.value;
+    select.dataset.signature = signature;
+    select.innerHTML = '';
+    for (const config of state.configs) {
+      const option = document.createElement('option');
+      option.value = config.name;
+      option.textContent = config.label;
+      select.appendChild(option);
+    }
+    select.value = current && state.configs.some((item) => item.name === current) ? current : selected;
+    return;
   }
-  select.value = current && state.configs.some((item) => item.name === current) ? current : selected;
+
+  if (select.value !== selected) {
+    select.value = state.configs.some((item) => item.name === selected) ? selected : select.value;
+  }
 }
 
 function renderSettings() {
   $('#launchAtLoginToggle').checked = Boolean(state.settings.launchAtLogin);
   $('#autoStartToggle').checked = Boolean(state.settings.autoStartZapret);
   $('#autoUpdateToggle').checked = Boolean(state.settings.autoUpdateZapret);
+  setChecked('#unloadWindowToggle', state.settings.unloadWindowInTray);
+  setChecked('#ecoModeToggle', state.settings.ecoMode);
+  setChecked('#disableGpuToggle', state.settings.disableGpu);
+  setChecked('#startMinimizedToggle', state.settings.startMinimized);
+  setChecked('#watchdogToggle', state.settings.watchdog);
+  setChecked('#hotkeyToggle', state.settings.toggleHotkey);
+
+  renderCustomThemeInputs();
+
+  const hotkeyLabel = $('#hotkeyLabel');
+  if (hotkeyLabel && state.hotkey?.combo) hotkeyLabel.textContent = state.hotkey.combo;
+
+  const winwsMemory = $('#winwsMemoryState');
+  if (winwsMemory) {
+    const kb = state.running?.memoryKb || 0;
+    winwsMemory.textContent = state.running?.active && kb ? `${Math.round(kb / 1024)} МБ` : '—';
+  }
   $('#testModeSelect').value = state.settings.testMode || 'fast';
   $('#ambientIntensityRange').value = state.settings.ambientIntensity ?? 72;
   $('#glassBlurRange').value = state.settings.glassBlur ?? 18;
@@ -295,6 +499,11 @@ function renderSettings() {
   });
 }
 
+function setChecked(selector, value) {
+  const input = $(selector);
+  if (input) input.checked = Boolean(value);
+}
+
 function renderUpdate() {
   const update = state?.update;
   if (!update) return;
@@ -303,6 +512,30 @@ function renderUpdate() {
   notice.textContent = update.message || '...';
   notice.classList.toggle('notice-good', update.status === 'current' || update.status === 'updated');
   notice.classList.toggle('notice-warn', update.status === 'available' || update.status === 'downloading' || update.status === 'installing');
+}
+
+function renderAppUpdateSettings() {
+  const versionEl = $('#appVersionState');
+  const noticeEl = $('#appUpdateNotice');
+  const installBtn = $('#installAppUpdateBtn');
+  if (!versionEl || !noticeEl) return;
+
+  const current = state?.appVersion || '...';
+  const appUpdate = state?.appUpdate;
+  const latest = appUpdate?.version;
+
+  if (latest && appUpdate?.status && !['up-to-date', 'idle', 'dev', 'checking'].includes(appUpdate.status)) {
+    versionEl.textContent = `${current} → ${latest}`;
+  } else {
+    versionEl.textContent = current;
+  }
+
+  noticeEl.textContent = appUpdate?.message || 'Проверка обновлений при запуске';
+  noticeEl.classList.toggle('notice-good', appUpdate?.status === 'up-to-date' || appUpdate?.status === 'downloaded');
+  noticeEl.classList.toggle('notice-warn', ['available', 'downloading', 'checking'].includes(appUpdate?.status));
+  noticeEl.classList.toggle('notice-error', appUpdate?.status === 'error');
+
+  if (installBtn) installBtn.hidden = appUpdate?.status !== 'downloaded';
 }
 
 function renderAppUpdateBanner() {
@@ -362,8 +595,17 @@ function showToast(type, message, options = {}) {
   const stack = $('#toastStack');
   if (!stack || !message) return;
 
+  // Уведомление с тем же действием заменяем, а не копим — иначе стопка растёт бесконечно.
+  if (options.action) {
+    stack.querySelectorAll(`[data-action="${options.action}"]`).forEach((node) => node.remove());
+  }
+  while (stack.childElementCount >= TOAST_LIMIT) {
+    stack.removeChild(stack.firstElementChild);
+  }
+
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}${options.action ? ' toast-actionable' : ''}`;
+  if (options.action) toast.dataset.action = options.action;
 
   const titleHtml = options.title ? `<strong>${escapeHtml(options.title)}</strong>` : '';
   toast.innerHTML = `${titleHtml}<p>${escapeHtml(message)}</p>`;
@@ -397,24 +639,86 @@ function dismissToast(toast) {
   setTimeout(() => toast.remove(), 260);
 }
 
-function renderThemes() {
+function initThemes() {
   const grid = $('#themeGrid');
-  if (!grid) return;
-  const active = state?.settings?.theme || document.body.dataset.theme || 'aurora';
-  grid.innerHTML = '';
+  if (!grid || grid.dataset.bound === '1') return;
+  grid.dataset.bound = '1';
 
   for (const theme of themes) {
     const button = document.createElement('button');
     button.className = `theme-swatch theme-${theme.id}`;
     button.dataset.theme = theme.id;
     button.innerHTML = `<span></span><strong>${theme.name}</strong><small>${theme.hint}</small>`;
-    button.classList.toggle('active', theme.id === active);
     button.addEventListener('click', async () => {
       document.body.dataset.theme = theme.id;
       await patchSetting({ theme: theme.id });
     });
     grid.appendChild(button);
   }
+}
+
+function readCustomThemeInputs() {
+  return {
+    accent: $('#customAccent')?.value || defaultCustomTheme.accent,
+    accent2: $('#customAccent2')?.value || defaultCustomTheme.accent2,
+    accent3: $('#customAccent3')?.value || defaultCustomTheme.accent3,
+    bg: $('#customBg')?.value || defaultCustomTheme.bg
+  };
+}
+
+function applyCustomTheme(theme = state?.settings?.customTheme) {
+  const colors = { ...defaultCustomTheme, ...(theme || {}) };
+  const root = document.documentElement.style;
+  root.setProperty('--custom-accent', colors.accent);
+  root.setProperty('--custom-accent-2', colors.accent2);
+  root.setProperty('--custom-accent-3', colors.accent3);
+  root.setProperty('--custom-bg', colors.bg);
+}
+
+function renderCustomThemeInputs() {
+  const colors = { ...defaultCustomTheme, ...(state?.settings?.customTheme || {}) };
+  const fields = {
+    '#customAccent': colors.accent,
+    '#customAccent2': colors.accent2,
+    '#customAccent3': colors.accent3,
+    '#customBg': colors.bg
+  };
+
+  for (const [selector, value] of Object.entries(fields)) {
+    const input = $(selector);
+    // Не перебиваем значение, пока пользователь держит открытой палитру.
+    if (input && document.activeElement !== input) input.value = value;
+  }
+}
+
+function randomHexColor(minLight, maxLight) {
+  const hue = Math.floor(Math.random() * 360);
+  const saturation = 55 + Math.floor(Math.random() * 35);
+  const light = minLight + Math.floor(Math.random() * (maxLight - minLight));
+  return hslToHex(hue, saturation, light);
+}
+
+function hslToHex(h, s, l) {
+  const saturation = s / 100;
+  const light = l / 100;
+  const k = (n) => (n + h / 30) % 12;
+  const a = saturation * Math.min(light, 1 - light);
+  const f = (n) => {
+    const value = light - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return Math.round(255 * value).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+function updateThemeSelection() {
+  const active = state?.settings?.theme || document.body.dataset.theme || 'aurora';
+  $$('#themeGrid .theme-swatch').forEach((button) => {
+    button.classList.toggle('active', button.dataset.theme === active);
+  });
+}
+
+function renderThemes() {
+  updateThemeSelection();
 }
 
 function bindRange(selector, key) {
@@ -473,13 +777,36 @@ async function refreshLogs() {
 function renderLogs() {
   const preview = $('#homeLogs');
   if (!preview) return;
-  preview.innerHTML = '';
-  logs.slice(-120).forEach((entry) => {
+
+  const lastSeq = Number(preview.dataset.lastSeq || 0);
+  const fresh = logs.filter((entry) => (entry.seq || 0) > lastSeq);
+
+  // Обычно дописываем только новые строки; полная перерисовка — при первом рендере и очистке.
+  if (!preview.childElementCount || fresh.length === logs.length) {
+    preview.textContent = '';
+    appendLogRows(preview, logs.slice(-LOG_ROWS_VISIBLE));
+  } else {
+    appendLogRows(preview, fresh);
+  }
+
+  while (preview.childElementCount > LOG_ROWS_VISIBLE) {
+    preview.removeChild(preview.firstElementChild);
+  }
+
+  preview.dataset.lastSeq = String(logs.length ? logs[logs.length - 1].seq || 0 : 0);
+}
+
+function appendLogRows(container, entries) {
+  if (!entries.length) return;
+
+  const fragment = document.createDocumentFragment();
+  for (const entry of entries) {
     const row = document.createElement('div');
     row.className = `log-row ${entry.type}`;
     row.textContent = `${formatTime(entry.time)} ${entry.message}`;
-    preview.appendChild(row);
-  });
+    fragment.appendChild(row);
+  }
+  container.appendChild(fragment);
 }
 
 function appendTestResult(result) {

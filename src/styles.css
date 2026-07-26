@@ -55,6 +55,30 @@ body[data-theme="orchid"]   { --bg:#100b15; --bg-2:#1a1322; --bg-3:#08050c; --si
 body[data-theme="forest"]   { --bg:#070f0a; --bg-2:#0d1a13; --bg-3:#040806; --sidebar:rgba(13,25,18,.66); --surface:rgba(18,34,24,.56); --surface-2:rgba(25,48,34,.64); --surface-3:rgba(35,68,48,.74); --accent:#6fcf80; --accent-2:#a7f3a0; --accent-3:#4cc9c0; --danger:#f4778c; --good:#5dd39e; }
 body[data-theme="ruby"]     { --bg:#120a0d; --bg-2:#1d1116; --bg-3:#0a0507; --sidebar:rgba(30,17,22,.66); --surface:rgba(43,24,31,.56); --surface-2:rgba(58,33,42,.64); --surface-3:rgba(82,47,59,.74); --accent:#ff6b88; --accent-2:#ff9eb1; --accent-3:#6ea8fe; --danger:#ff5c72; --good:#5dd39e; }
 body[data-theme="noir"]     { --bg:#08090b; --bg-2:#101216; --bg-3:#040506; --sidebar:rgba(16,18,22,.7); --surface:rgba(22,25,30,.6); --surface-2:rgba(32,36,43,.68); --surface-3:rgba(46,52,62,.76); --accent:#e9edf4; --accent-2:#9fb4d6; --accent-3:#7c9cff; --danger:#f4778c; --good:#7bd6a4; }
+body[data-theme="midnight"] { --bg:#070b14; --bg-2:#0d1526; --bg-3:#03060d; --sidebar:rgba(13,21,38,.66); --surface:rgba(19,30,52,.56); --surface-2:rgba(27,42,72,.64); --surface-3:rgba(38,59,100,.74); --accent:#6c8cff; --accent-2:#8fb2ff; --accent-3:#4cd6e8; --danger:#ff6b8a; --good:#3ddc97; }
+body[data-theme="sunset"]   { --bg:#140a10; --bg-2:#22111a; --bg-3:#0a0508; --sidebar:rgba(34,17,26,.66); --surface:rgba(48,24,36,.56); --surface-2:rgba(66,32,48,.64); --surface-3:rgba(92,45,66,.74); --accent:#ff7a59; --accent-2:#ffb37a; --accent-3:#ff4d8d; --danger:#ff5470; --good:#5dd39e; }
+body[data-theme="matrix"]   { --bg:#040805; --bg-2:#08130c; --bg-3:#020403; --sidebar:rgba(8,19,12,.72); --surface:rgba(11,28,17,.6); --surface-2:rgba(16,42,25,.68); --surface-3:rgba(23,62,37,.78); --accent:#22ff88; --accent-2:#7cffb8; --accent-3:#12d6a0; --danger:#ff5c72; --good:#22ff88; }
+body[data-theme="cyber"]    { --bg:#0d0618; --bg-2:#170a29; --bg-3:#060310; --sidebar:rgba(23,10,41,.68); --surface:rgba(34,14,58,.58); --surface-2:rgba(48,20,80,.66); --surface-3:rgba(68,29,112,.76); --accent:#ffe14d; --accent-2:#ff3ea5; --accent-3:#22d3ee; --danger:#ff3ea5; --good:#4ade80; }
+body[data-theme="sakura"]   { --bg:#150a10; --bg-2:#22111b; --bg-3:#0a0508; --sidebar:rgba(34,17,27,.64); --surface:rgba(50,26,39,.56); --surface-2:rgba(68,36,53,.64); --surface-3:rgba(95,51,74,.74); --accent:#ff9ec4; --accent-2:#ffd0e0; --accent-3:#a78bfa; --danger:#ff5c8a; --good:#5dd39e; }
+body[data-theme="mocha"]    { --bg:#14100d; --bg-2:#201913; --bg-3:#0a0806; --sidebar:rgba(32,25,19,.66); --surface:rgba(46,36,27,.56); --surface-2:rgba(62,49,37,.64); --surface-3:rgba(88,69,52,.74); --accent:#d8a15c; --accent-2:#f0c08a; --accent-3:#89b4fa; --danger:#f38ba8; --good:#a6e3a1; }
+body[data-theme="nord"]     { --bg:#0f141b; --bg-2:#18202b; --bg-3:#080b0f; --sidebar:rgba(24,32,43,.68); --surface:rgba(33,44,58,.58); --surface-2:rgba(46,60,79,.66); --surface-3:rgba(64,82,107,.76); --accent:#88c0d0; --accent-2:#8fbcbb; --accent-3:#81a1c1; --danger:#bf616a; --good:#a3be8c; }
+body[data-theme="dracula"]  { --bg:#12101c; --bg-2:#1c192b; --bg-3:#0a0912; --sidebar:rgba(28,25,43,.68); --surface:rgba(40,36,60,.58); --surface-2:rgba(55,49,82,.66); --surface-3:rgba(76,68,113,.76); --accent:#bd93f9; --accent-2:#ff79c6; --accent-3:#8be9fd; --danger:#ff5555; --good:#50fa7b; }
+body[data-theme="gold"]     { --bg:#0c0a06; --bg-2:#16120a; --bg-3:#050403; --sidebar:rgba(22,18,10,.7); --surface:rgba(34,28,16,.58); --surface-2:rgba(48,39,22,.66); --surface-3:rgba(70,57,32,.76); --accent:#e7c063; --accent-2:#f5dc9a; --accent-3:#b08d3f; --danger:#e06c6c; --good:#8fd694; }
+body[data-theme="ocean"]    { --bg:#05101a; --bg-2:#0a1c2c; --bg-3:#020810; --sidebar:rgba(10,28,44,.66); --surface:rgba(14,40,62,.56); --surface-2:rgba(20,56,86,.64); --surface-3:rgba(28,78,120,.74); --accent:#2f80ed; --accent-2:#56ccf2; --accent-3:#00d1b2; --danger:#ff6b8a; --good:#2dd4a7; }
+
+/* Своя тема: базовые цвета приходят из настроек как --custom-* переменные */
+body[data-theme="custom"] {
+  --bg: var(--custom-bg, #0b0b0f);
+  --bg-2: color-mix(in srgb, var(--custom-bg, #0b0b0f) 84%, var(--custom-accent, #7c5cff));
+  --bg-3: color-mix(in srgb, var(--custom-bg, #0b0b0f) 72%, #000000);
+  --sidebar: color-mix(in srgb, var(--custom-bg, #0b0b0f) 66%, transparent);
+  --surface: color-mix(in srgb, color-mix(in srgb, var(--custom-bg, #0b0b0f) 90%, var(--custom-accent, #7c5cff)) 56%, transparent);
+  --surface-2: color-mix(in srgb, color-mix(in srgb, var(--custom-bg, #0b0b0f) 82%, var(--custom-accent, #7c5cff)) 64%, transparent);
+  --surface-3: color-mix(in srgb, color-mix(in srgb, var(--custom-bg, #0b0b0f) 72%, var(--custom-accent, #7c5cff)) 74%, transparent);
+  --accent: var(--custom-accent, #7c5cff);
+  --accent-2: var(--custom-accent-2, #32d6c8);
+  --accent-3: var(--custom-accent-3, #5b7bff);
+}
 
 /* --------------------------------------------------------------------- */
 * { box-sizing: border-box; }
@@ -273,8 +297,8 @@ button { border: 0; cursor: pointer; }
 .content { min-width: 0; min-height: 0; overflow: auto; padding: 30px 30px 26px; background: transparent; }
 
 .tab-panel { display: none; }
-.tab-panel.active { display: block; animation: fadeIn 320ms var(--ease); }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.tab-panel.active { display: block; animation: fadeIn 120ms var(--ease); }
+@keyframes fadeIn { from { opacity: 0.82; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
 
 .toolbar { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; margin-bottom: 18px; padding: 0 2px; }
 
@@ -423,6 +447,13 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 .notice { margin-top: 12px; line-height: 1.5; font-size: 12.5px; }
 .notice-good { color: var(--good); }
 .notice-warn { color: var(--warn); }
+.notice-error { color: var(--danger); }
+
+.app-version-row strong {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
 
 .app-banners {
   position: fixed;
@@ -631,6 +662,33 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 .theme-forest span   { background: linear-gradient(110deg, #6fcf80 0 40%, #a7f3a0 40% 70%, #4cc9c0 70%); }
 .theme-ruby span     { background: linear-gradient(110deg, #ff6b88 0 40%, #ff9eb1 40% 70%, #6ea8fe 70%); }
 .theme-noir span     { background: linear-gradient(110deg, #e9edf4 0 40%, #9fb4d6 40% 70%, #7c9cff 70%); }
+.theme-midnight span { background: linear-gradient(110deg, #6c8cff 0 40%, #8fb2ff 40% 70%, #4cd6e8 70%); }
+.theme-sunset span   { background: linear-gradient(110deg, #ff7a59 0 40%, #ffb37a 40% 70%, #ff4d8d 70%); }
+.theme-matrix span   { background: linear-gradient(110deg, #22ff88 0 40%, #7cffb8 40% 70%, #12d6a0 70%); }
+.theme-cyber span    { background: linear-gradient(110deg, #ffe14d 0 40%, #ff3ea5 40% 70%, #22d3ee 70%); }
+.theme-sakura span   { background: linear-gradient(110deg, #ff9ec4 0 40%, #ffd0e0 40% 70%, #a78bfa 70%); }
+.theme-mocha span    { background: linear-gradient(110deg, #d8a15c 0 40%, #f0c08a 40% 70%, #89b4fa 70%); }
+.theme-nord span     { background: linear-gradient(110deg, #88c0d0 0 40%, #8fbcbb 40% 70%, #81a1c1 70%); }
+.theme-dracula span  { background: linear-gradient(110deg, #bd93f9 0 40%, #ff79c6 40% 70%, #8be9fd 70%); }
+.theme-gold span     { background: linear-gradient(110deg, #e7c063 0 40%, #f5dc9a 40% 70%, #b08d3f 70%); }
+.theme-ocean span    { background: linear-gradient(110deg, #2f80ed 0 40%, #56ccf2 40% 70%, #00d1b2 70%); }
+.theme-custom span   { background: linear-gradient(110deg, var(--custom-accent, #7c5cff) 0 40%, var(--custom-accent-2, #32d6c8) 40% 70%, var(--custom-accent-3, #5b7bff) 70%); }
+
+/* Конструктор своей темы */
+.custom-theme { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); display: grid; gap: 10px; }
+.custom-theme-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.color-field { display: grid; gap: 5px; justify-items: center; font-size: 10.5px; color: var(--muted); text-align: center; }
+.color-field input[type="color"] {
+  width: 100%;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.color-field input[type="color"]::-webkit-color-swatch-wrapper { padding: 3px; }
+.color-field input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 6px; }
 
 /* =====================================================================
    Home dashboard — centered power control (flex flow, no overlap)
@@ -715,6 +773,18 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
   .blob { animation: none; }
   .pulse.online { animation: none; }
   .tab-panel.active { animation: none; }
+}
+
+/* Окно не в фокусе или скрыто — гасим анимации и дорогой goo-фильтр,
+   иначе GPU продолжает молотить фон впустую */
+body.motion-idle .blob,
+body.motion-idle .pulse.online,
+body.motion-idle .power-halo {
+  animation-play-state: paused;
+}
+
+body.motion-idle .ambient-goo {
+  filter: blur(24px);
 }
 
 @media (max-width: 1080px) {

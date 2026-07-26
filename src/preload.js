@@ -10,6 +10,8 @@ const listen = (channel, callback) => {
 contextBridge.exposeInMainWorld('zapret', {
   getState: () => invoke('state:get'),
   hideWindow: () => invoke('window:hide'),
+  unloadWindow: () => invoke('window:unload'),
+  getMetrics: () => invoke('app:metrics'),
   relaunchAdmin: () => invoke('admin:relaunch'),
   openRoot: () => invoke('path:openRoot'),
   openLogs: () => invoke('path:openLogs'),

@@ -254,6 +254,32 @@
             <div class="panel">
               <h2>Темы</h2>
               <div class="theme-grid" id="themeGrid"></div>
+
+              <div class="custom-theme">
+                <h2>Своя тема</h2>
+                <div class="custom-theme-grid">
+                  <label class="color-field">
+                    <input type="color" id="customAccent" value="#7c5cff" />
+                    <span>Акцент</span>
+                  </label>
+                  <label class="color-field">
+                    <input type="color" id="customAccent2" value="#32d6c8" />
+                    <span>Второй</span>
+                  </label>
+                  <label class="color-field">
+                    <input type="color" id="customAccent3" value="#5b7bff" />
+                    <span>Третий</span>
+                  </label>
+                  <label class="color-field">
+                    <input type="color" id="customBg" value="#0b0b0f" />
+                    <span>Фон</span>
+                  </label>
+                </div>
+                <div class="button-row">
+                  <button class="primary-button" id="applyCustomThemeBtn">Применить</button>
+                  <button class="ghost-button" id="randomCustomThemeBtn">Случайная</button>
+                </div>
+              </div>
             </div>
 
             <div class="panel">
@@ -289,6 +315,64 @@
                 <button data-mode="tcp">TCP</button>
                 <button data-mode="udp">UDP</button>
               </div>
+            </div>
+
+            <div class="panel">
+              <h2>Приложение</h2>
+              <div class="switch-row app-version-row">
+                <span>Версия</span>
+                <strong id="appVersionState">...</strong>
+              </div>
+              <div class="button-row">
+                <button class="ghost-button" id="checkAppUpdateBtn">Проверить обновления</button>
+                <button class="primary-button" id="installAppUpdateBtn" hidden>Установить</button>
+              </div>
+              <div class="notice" id="appUpdateNotice">...</div>
+            </div>
+
+            <div class="panel">
+              <h2>Ресурсы и память</h2>
+              <div class="switch-row app-version-row">
+                <span>Приложение занимает</span>
+                <strong id="memoryState">...</strong>
+              </div>
+              <div class="switch-row app-version-row">
+                <span>winws.exe</span>
+                <strong id="winwsMemoryState">—</strong>
+              </div>
+              <div class="switch-row">
+                <span>Выгружать интерфейс из памяти в трее</span>
+                <label class="switch"><input type="checkbox" id="unloadWindowToggle" /><span></span></label>
+              </div>
+              <div class="switch-row">
+                <span>Экономный режим (реже опрашивать статус)</span>
+                <label class="switch"><input type="checkbox" id="ecoModeToggle" /><span></span></label>
+              </div>
+              <div class="switch-row">
+                <span>Без аппаратного ускорения (−150 МБ, нужен перезапуск)</span>
+                <label class="switch"><input type="checkbox" id="disableGpuToggle" /><span></span></label>
+              </div>
+              <div class="button-row">
+                <button class="ghost-button" id="unloadWindowBtn">Свернуть и освободить память</button>
+              </div>
+              <div class="notice" id="memoryNotice">В трее интерфейс выгружается и остаётся только фоновый процесс.</div>
+            </div>
+
+            <div class="panel">
+              <h2>Поведение</h2>
+              <div class="switch-row">
+                <span>Запускать свёрнутым в трей</span>
+                <label class="switch"><input type="checkbox" id="startMinimizedToggle" /><span></span></label>
+              </div>
+              <div class="switch-row">
+                <span>Следить за zapret и перезапускать при сбое</span>
+                <label class="switch"><input type="checkbox" id="watchdogToggle" /><span></span></label>
+              </div>
+              <div class="switch-row">
+                <span>Горячая клавиша <code id="hotkeyLabel">Ctrl+Alt+Z</code></span>
+                <label class="switch"><input type="checkbox" id="hotkeyToggle" /><span></span></label>
+              </div>
+              <div class="notice" id="behaviourNotice">Watchdog поднимает zapret, если winws.exe упал или система вышла из сна.</div>
             </div>
 
             <div class="panel">

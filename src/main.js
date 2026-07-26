@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, shell } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, shell, globalShortcut, powerMonitor } = require('electron');
 const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const https = require('node:https');
@@ -14,7 +14,24 @@ const APP_RELEASE_API_URL = `https://api.github.com/repos/${APP_REPO}/releases/l
 const RELEASE_API_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
 const SERVICE_NAME = 'zapret';
 const SERVICE_SDDL = 'D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;LCRPWPLO;;;IU)(A;;LCRPWPLO;;;AU)';
-const startupDebugFile = path.join(process.cwd(), 'startup-debug.log');
+const TOGGLE_HOTKEY = 'Control+Alt+Z';
+const WINDOW_UNLOAD_DELAY_MS = 12000;
+const LOG_MAX_BYTES = 512 * 1024;
+const LOG_TAIL_BYTES = 192 * 1024;
+const STARTUP_DEBUG_MAX_BYTES = 64 * 1024;
+const RECENT_LOGS_LIMIT = 300;
+const WATCHDOG_MAX_ATTEMPTS = 3;
+const WATCHDOG_WINDOW_MS = 5 * 60 * 1000;
+const POLL_INTERVAL_FOCUSED_MS = 5000;
+const POLL_INTERVAL_VISIBLE_MS = 15000;
+const POLL_INTERVAL_TRAY_MS = 60000;
+const POLL_INTERVAL_ECO_TRAY_MS = 180000;
+const POLL_INTERVAL_TEST_MS = 2000;
+const THEMES = [
+  'figma', 'aurora', 'graphite', 'ember', 'glacier', 'orchid', 'forest', 'ruby', 'noir',
+  'midnight', 'sunset', 'matrix', 'cyber', 'sakura', 'mocha', 'nord', 'dracula', 'gold', 'ocean',
+  'custom'
+];
 
 const rootDir = resolveZapretRoot();
 const binDir = path.join(rootDir, 'bin');
@@ -24,14 +41,25 @@ const winwsExe = path.join(binDir, 'winws.exe');
 
 let mainWindow = null;
 let tray = null;
+let trayMenuSignature = null;
 let isQuitting = false;
 let winwsChild = null;
 let settings = null;
 let settingsFile = null;
 let logFile = null;
+let logFileBytes = null;
+let startupDebugFile = null;
 let recentLogs = [];
 let activeTest = null;
 let startZapretInFlight = null;
+let pollTimer = null;
+let pollIntervalMs = 0;
+let windowUnloadTimer = null;
+let intentionalStop = false;
+let watchdogAttempts = [];
+let watchdogTimer = null;
+let lastActiveConfig = null;
+let hotkeyRegistered = false;
 let lastUpdate = {
   status: 'idle',
   localVersion: null,
@@ -45,11 +73,29 @@ let lastAppUpdate = {
   progress: 0
 };
 let pendingAppInstallerPath = null;
+let cachedAdmin = null;
+let cachedServiceConfigName = undefined;
+let runtimeStatus = {
+  running: { active: false, processes: [], managedCount: 0, externalCount: 0 },
+  service: { installed: false, state: 'NOT_INSTALLED', configName: null },
+  refreshedAt: 0
+};
+let runtimeStatusPromise = null;
+let buildStatePromise = null;
+let configsCache = null;
+const RUNTIME_STATUS_TTL_MS = 2500;
+const CONFIGS_TTL_MS = 30000;
 
 const defaultSettings = {
   selectedConfig: 'general.bat',
   bestConfig: 'general.bat',
   theme: 'figma',
+  customTheme: {
+    accent: '#7c5cff',
+    accent2: '#32d6c8',
+    accent3: '#5b7bff',
+    bg: '#0b0b0f'
+  },
   launchAtLogin: true,
   autoStartZapret: true,
   autoUpdateZapret: true,
@@ -58,8 +104,15 @@ const defaultSettings = {
   testMode: 'fast',
   ambientIntensity: 72,
   glassBlur: 18,
-  motionSpeed: 55
+  motionSpeed: 55,
+  unloadWindowInTray: true,
+  ecoMode: true,
+  disableGpu: false,
+  watchdog: true,
+  toggleHotkey: true
 };
+
+applyEarlySettings();
 
 const useSingleInstanceLock = shouldUseSingleInstanceLock();
 let ownsSingleInstanceLock = !useSingleInstanceLock || app.requestSingleInstanceLock();
@@ -83,6 +136,23 @@ app.on('window-all-closed', () => {});
 
 app.on('before-quit', () => {
   isQuitting = true;
+  stopStatusPolling();
+  cancelWindowUnload();
+  if (watchdogTimer) {
+    clearTimeout(watchdogTimer);
+    watchdogTimer = null;
+  }
+});
+
+app.on('will-quit', () => {
+  if (hotkeyRegistered) {
+    globalShortcut.unregisterAll();
+    hotkeyRegistered = false;
+  }
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
 });
 
 function shouldUseSingleInstanceLock() {
@@ -108,25 +178,38 @@ async function bootstrap() {
 
   ensureZapretFiles();
   syncLoginItem();
-  createWindow();
-  writeStartupDebug('window created');
+
+  const startHidden = process.argv.includes('--startup') && settings.startMinimized;
+
   createTray();
   writeStartupDebug('tray created');
   registerIpc();
-  setupAppUpdater();
+  registerToggleHotkey();
+  registerPowerEvents();
+  cleanupStaleInstallers();
+
+  if (startHidden) {
+    writeStartupDebug('start hidden: окно не создаётся, экономия памяти');
+  } else {
+    createWindow();
+    writeStartupDebug('window created');
+    showMainWindow();
+  }
+
+  scheduleStatusPoll(true);
   log(`Приложение запущено. Корень zapret: ${rootDir}`);
+
   const runningAtLaunch = await getWinwsStatus();
   if (runningAtLaunch.active) {
     log(`Подхвачен уже запущенный winws.exe: ${runningAtLaunch.processes.length} процесс(ов)`);
   }
 
-  const startHidden = process.argv.includes('--startup') && settings.startMinimized;
-  if (startHidden) {
-    mainWindow.hide();
-    writeStartupDebug('window hidden');
-  } else {
-    mainWindow.show();
-    writeStartupDebug('window shown');
+  if (app.isPackaged) {
+    setTimeout(() => {
+      checkForAppUpdate().catch((error) => {
+        log(`Не удалось проверить обновление приложения: ${error.message}`, 'error');
+      });
+    }, 6000);
   }
 
   if (settings.autoUpdateZapret) {
@@ -143,9 +226,23 @@ async function bootstrap() {
   }
 }
 
+function resolveStartupDebugFile() {
+  if (startupDebugFile) return startupDebugFile;
+  try {
+    startupDebugFile = path.join(app.getPath('userData'), 'startup-debug.log');
+  } catch {
+    startupDebugFile = path.join(os.tmpdir(), 'zapret-startup-debug.log');
+  }
+  return startupDebugFile;
+}
+
 function writeStartupDebug(message) {
   try {
-    fs.appendFileSync(startupDebugFile, `[${new Date().toISOString()}] ${message}${os.EOL}`, 'utf8');
+    const file = resolveStartupDebugFile();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
+    if (size > STARTUP_DEBUG_MAX_BYTES) fs.rmSync(file, { force: true });
+    fs.appendFileSync(file, `[${new Date().toISOString()}] ${message}${os.EOL}`, 'utf8');
   } catch {}
 }
 
@@ -179,7 +276,17 @@ async function shouldRelaunchElevated() {
   return explicitAdmin;
 }
 
+function hasWindow() {
+  return Boolean(mainWindow) && !mainWindow.isDestroyed();
+}
+
+function isWindowVisible() {
+  return hasWindow() && mainWindow.isVisible();
+}
+
 function createWindow() {
+  if (hasWindow()) return mainWindow;
+
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 760,
@@ -191,34 +298,88 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: true,
+      spellcheck: false
     }
   });
 
+  const window = mainWindow;
   Menu.setApplicationMenu(null);
-  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  window.loadFile(path.join(__dirname, 'index.html'));
 
-  mainWindow.webContents.once('did-finish-load', () => {
-    if (app.isPackaged) {
-      setTimeout(() => {
-        checkForAppUpdate().catch((error) => {
-          log(`Не удалось проверить обновление приложения: ${error.message}`, 'error');
-        });
-      }, 1500);
-    }
-  });
-
-  mainWindow.on('minimize', (event) => {
+  window.on('minimize', (event) => {
     event.preventDefault();
-    mainWindow.hide();
+    hideMainWindow();
   });
 
-  mainWindow.on('close', (event) => {
+  window.on('close', (event) => {
     if (!isQuitting) {
       event.preventDefault();
-      mainWindow.hide();
+      hideMainWindow();
     }
   });
+
+  window.on('show', () => {
+    cancelWindowUnload();
+    scheduleStatusPoll(true);
+  });
+
+  window.on('hide', () => {
+    scheduleWindowUnload();
+    scheduleStatusPoll(true);
+  });
+
+  window.on('focus', () => scheduleStatusPoll(true));
+  window.on('blur', () => scheduleStatusPoll(true));
+
+  window.on('closed', () => {
+    // Окно могло быть пересоздано — обнуляем только свою ссылку.
+    if (mainWindow === window) mainWindow = null;
+    trayMenuSignature = null;
+    scheduleStatusPoll(true);
+  });
+
+  return window;
+}
+
+function scheduleWindowUnload() {
+  cancelWindowUnload();
+  if (!settings?.unloadWindowInTray) return;
+
+  windowUnloadTimer = setTimeout(() => {
+    windowUnloadTimer = null;
+    unloadWindow();
+  }, WINDOW_UNLOAD_DELAY_MS);
+  windowUnloadTimer.unref?.();
+}
+
+function cancelWindowUnload() {
+  if (windowUnloadTimer) {
+    clearTimeout(windowUnloadTimer);
+    windowUnloadTimer = null;
+  }
+}
+
+function canUnloadWindow() {
+  if (isQuitting) return false;
+  if (activeTest) return false;
+  if (lastAppUpdate.status === 'downloading') return false;
+  if (lastUpdate.status === 'downloading' || lastUpdate.status === 'installing') return false;
+  return true;
+}
+
+function unloadWindow(force = false) {
+  if (!hasWindow()) return false;
+  if (mainWindow.isVisible() && !force) return false;
+  if (!canUnloadWindow()) return false;
+
+  const target = mainWindow;
+  mainWindow = null;
+  target.destroy();
+  log('Интерфейс выгружен из памяти, работает только трей');
+  scheduleStatusPoll(true);
+  return true;
 }
 
 function createTray() {
@@ -234,10 +395,63 @@ function createTray() {
 
   tray = new Tray(icon);
   tray.setToolTip(APP_NAME);
+  tray.on('double-click', showMainWindow);
+  updateTray();
+}
+
+function updateTray() {
+  if (!tray || tray.isDestroyed?.()) return;
+
+  const running = runtimeStatus.running;
+  const service = runtimeStatus.service;
+  const active = Boolean(running?.active);
+  const configLabel = (settings?.selectedConfig || '').replace(/\.bat$/i, '');
+  const signature = [active, service?.state, configLabel, settings?.autoStartZapret, hasWindow()].join('|');
+  if (signature === trayMenuSignature) return;
+  trayMenuSignature = signature;
+
+  const configs = getConfigs().slice(0, 24);
+  const statusLabel = active ? 'zapret работает' : 'zapret остановлен';
+
+  tray.setToolTip(`${APP_NAME}\n${statusLabel}${configLabel ? ` · ${configLabel}` : ''}`);
   tray.setContextMenu(Menu.buildFromTemplate([
+    { label: statusLabel, enabled: false },
+    { type: 'separator' },
     { label: 'Открыть', click: showMainWindow },
-    { label: 'Включить zapret', click: () => startZapret(settings.bestConfig || settings.selectedConfig).catch((error) => log(error.message, 'error')) },
-    { label: 'Остановить zapret', click: () => stopZapretProcesses({ stopService: true }).catch((error) => log(error.message, 'error')) },
+    {
+      label: active ? 'Остановить zapret' : 'Включить zapret',
+      click: () => {
+        const task = active
+          ? stopZapretProcesses({ stopService: true })
+          : startZapret(settings.bestConfig || settings.selectedConfig, { remember: false, reason: 'tray' });
+        task.catch((error) => log(error.message, 'error'));
+      }
+    },
+    { label: 'Перезапустить zapret', click: () => restartZapret().catch((error) => log(error.message, 'error')) },
+    {
+      label: 'Конфиг',
+      submenu: configs.map((config) => ({
+        label: config.label,
+        type: 'radio',
+        checked: config.name === settings.selectedConfig,
+        click: () => {
+          startZapret(config.name, { remember: true, reason: 'tray-config' })
+            .catch((error) => log(error.message, 'error'));
+        }
+      }))
+    },
+    { type: 'separator' },
+    {
+      label: 'Автозапуск zapret',
+      type: 'checkbox',
+      checked: Boolean(settings?.autoStartZapret),
+      click: (item) => {
+        settings.autoStartZapret = item.checked;
+        saveSettings();
+        sendState().catch(() => {});
+      }
+    },
+    { label: 'Папка с логами', click: () => shell.openPath(path.dirname(logFile)) },
     { type: 'separator' },
     {
       label: 'Выйти',
@@ -247,22 +461,170 @@ function createTray() {
       }
     }
   ]));
-  tray.on('double-click', showMainWindow);
 }
 
 function showMainWindow() {
-  if (!mainWindow) return;
-  mainWindow.show();
+  cancelWindowUnload();
+
+  if (!hasWindow()) {
+    const window = createWindow();
+    const reveal = () => {
+      if (window.isDestroyed() || window.isVisible()) return;
+      window.show();
+      window.focus();
+    };
+    window.once('ready-to-show', reveal);
+    // Страховка: если ready-to-show не придёт, окно всё равно должно появиться.
+    setTimeout(reveal, 3000).unref?.();
+    return;
+  }
+
   if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
   mainWindow.focus();
+}
+
+function hideMainWindow() {
+  if (!hasWindow()) return;
+  mainWindow.hide();
+}
+
+function toggleMainWindow() {
+  if (isWindowVisible() && mainWindow.isFocused()) {
+    hideMainWindow();
+    return;
+  }
+  showMainWindow();
+}
+
+function registerToggleHotkey() {
+  if (hotkeyRegistered) {
+    globalShortcut.unregister(TOGGLE_HOTKEY);
+    hotkeyRegistered = false;
+  }
+  if (!settings?.toggleHotkey) return;
+
+  try {
+    hotkeyRegistered = globalShortcut.register(TOGGLE_HOTKEY, toggleMainWindow);
+    if (!hotkeyRegistered) log(`Горячая клавиша ${TOGGLE_HOTKEY} занята другой программой`, 'warn');
+  } catch (error) {
+    log(`Не удалось назначить горячую клавишу: ${error.message}`, 'warn');
+  }
+}
+
+function registerPowerEvents() {
+  try {
+    powerMonitor.on('resume', () => {
+      log('Система вышла из сна — проверяю zapret');
+      setTimeout(() => {
+        refreshRuntimeStatus(true)
+          .then(() => {
+            if (settings.watchdog && !runtimeStatus.running.active && lastActiveConfig) {
+              triggerWatchdogRestart('после выхода из сна');
+            }
+            return sendState({ refresh: false });
+          })
+          .catch(() => {});
+      }, 4000);
+    });
+  } catch {}
+}
+
+function computePollInterval() {
+  if (activeTest) return POLL_INTERVAL_TEST_MS;
+  if (isWindowVisible()) {
+    return mainWindow.isFocused() ? POLL_INTERVAL_FOCUSED_MS : POLL_INTERVAL_VISIBLE_MS;
+  }
+  return settings?.ecoMode ? POLL_INTERVAL_ECO_TRAY_MS : POLL_INTERVAL_TRAY_MS;
+}
+
+function scheduleStatusPoll(reschedule = false) {
+  const interval = computePollInterval();
+  if (pollTimer && !reschedule && interval === pollIntervalMs) return;
+
+  stopStatusPolling();
+  if (isQuitting) return;
+
+  pollIntervalMs = interval;
+  pollTimer = setTimeout(runStatusPoll, interval);
+  pollTimer.unref?.();
+}
+
+function stopStatusPolling() {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+}
+
+async function runStatusPoll() {
+  pollTimer = null;
+  try {
+    const previousActive = runtimeStatus.running.active;
+    await refreshRuntimeStatus(true);
+    if (runtimeStatus.running.active) lastActiveConfig = settings.selectedConfig;
+    if (previousActive && !runtimeStatus.running.active && !intentionalStop && settings.watchdog) {
+      triggerWatchdogRestart('процесс winws.exe пропал');
+    }
+    await sendState({ refresh: false });
+  } catch {
+    // статус обновим на следующем тике
+  } finally {
+    scheduleStatusPoll(true);
+  }
+}
+
+function triggerWatchdogRestart(reason) {
+  if (watchdogTimer || isQuitting || activeTest || startZapretInFlight) return;
+
+  const now = Date.now();
+  watchdogAttempts = watchdogAttempts.filter((stamp) => now - stamp < WATCHDOG_WINDOW_MS);
+  if (watchdogAttempts.length >= WATCHDOG_MAX_ATTEMPTS) {
+    log('Watchdog: слишком много перезапусков подряд, жду', 'warn');
+    return;
+  }
+
+  watchdogAttempts.push(now);
+  log(`Watchdog: ${reason}, перезапускаю zapret`, 'warn');
+  watchdogTimer = setTimeout(() => {
+    watchdogTimer = null;
+    startZapret(lastActiveConfig || settings.bestConfig || settings.selectedConfig, { remember: false, reason: 'watchdog' })
+      .catch((error) => log(`Watchdog: перезапуск не удался — ${error.message}`, 'error'));
+  }, 2500);
+  watchdogTimer.unref?.();
+}
+
+async function restartZapret(configName) {
+  await stopZapretProcesses({ stopService: true });
+  return startZapret(configName || settings.selectedConfig, { remember: true, reason: 'manual' });
+}
+
+function cleanupStaleInstallers() {
+  try {
+    const dir = app.getPath('temp');
+    for (const name of fs.readdirSync(dir)) {
+      if (!/^Zapret-Control-Center-Setup-.*\.exe$/i.test(name)) continue;
+      const file = path.join(dir, name);
+      if (pendingAppInstallerPath && path.normalize(file).toLowerCase() === path.normalize(pendingAppInstallerPath).toLowerCase()) continue;
+      const stat = fs.statSync(file);
+      if (Date.now() - stat.mtimeMs > 24 * 60 * 60 * 1000) fs.rmSync(file, { force: true });
+    }
+  } catch {}
 }
 
 function registerIpc() {
   ipcMain.handle('state:get', async () => buildState());
   ipcMain.handle('window:hide', () => {
-    mainWindow?.hide();
+    hideMainWindow();
     return true;
   });
+  ipcMain.handle('window:unload', () => {
+    hideMainWindow();
+    cancelWindowUnload();
+    setTimeout(() => unloadWindow(true), 150);
+    return true;
+  });
+  ipcMain.handle('app:metrics', () => collectMetrics());
   ipcMain.handle('admin:relaunch', async () => {
     const relaunched = await relaunchAsAdmin({ elevatedAttempt: true, releaseLock: true });
     if (relaunched) {
@@ -283,17 +645,21 @@ function registerIpc() {
     return buildState();
   });
   ipcMain.handle('zapret:restart', async (_event, configName) => {
-    await stopZapretProcesses({ stopService: true });
-    await startZapret(configName || settings.selectedConfig, { remember: true, reason: 'manual' });
+    await restartZapret(configName);
     return buildState();
   });
 
   ipcMain.handle('settings:set', async (_event, patch) => {
-    settings = { ...settings, ...sanitizeSettingsPatch(patch) };
+    const safe = sanitizeSettingsPatch(patch);
+    settings = { ...settings, ...safe };
     if (patch?.gameFilterMode) setGameFilterMode(settings.gameFilterMode);
     saveSettings();
     syncLoginItem();
-    sendState();
+    if ('toggleHotkey' in safe) registerToggleHotkey();
+    if ('ecoMode' in safe) scheduleStatusPoll(true);
+    if ('unloadWindowInTray' in safe && !safe.unloadWindowInTray) cancelWindowUnload();
+    trayMenuSignature = null;
+    updateTray();
     return buildState();
   });
 
@@ -306,6 +672,8 @@ function registerIpc() {
   ipcMain.handle('logs:clear', () => {
     recentLogs = [];
     fs.writeFileSync(logFile, '', 'utf8');
+    fs.rmSync(`${logFile}.1`, { force: true });
+    logFileBytes = 0;
     send('log:cleared', true);
     return true;
   });
@@ -356,10 +724,27 @@ function registerIpc() {
 function loadSettings() {
   try {
     const file = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
-    return { ...defaultSettings, ...file, gameFilterMode: readGameFilterMode(file.gameFilterMode) };
+    return {
+      ...defaultSettings,
+      ...file,
+      customTheme: sanitizeCustomTheme(file.customTheme || {}),
+      gameFilterMode: readGameFilterMode(file.gameFilterMode)
+    };
   } catch {
     return { ...defaultSettings, gameFilterMode: readGameFilterMode(defaultSettings.gameFilterMode) };
   }
+}
+
+// Читается до app.whenReady(): аппаратное ускорение можно отключить только там.
+function applyEarlySettings() {
+  try {
+    const file = path.join(app.getPath('userData'), 'settings.json');
+    const early = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (early?.disableGpu) {
+      app.disableHardwareAcceleration();
+      app.commandLine.appendSwitch('disable-gpu-compositing');
+    }
+  } catch {}
 }
 
 function saveSettings() {
@@ -372,17 +757,37 @@ function sanitizeSettingsPatch(patch) {
   if (!patch || typeof patch !== 'object') return safe;
   if (typeof patch.selectedConfig === 'string') safe.selectedConfig = patch.selectedConfig;
   if (typeof patch.bestConfig === 'string') safe.bestConfig = patch.bestConfig;
-  if (typeof patch.theme === 'string') safe.theme = patch.theme;
+  if (typeof patch.theme === 'string' && THEMES.includes(patch.theme)) safe.theme = patch.theme;
+  if (patch.customTheme && typeof patch.customTheme === 'object') {
+    const custom = sanitizeCustomTheme(patch.customTheme);
+    if (custom) safe.customTheme = custom;
+  }
   if (typeof patch.launchAtLogin === 'boolean') safe.launchAtLogin = patch.launchAtLogin;
   if (typeof patch.autoStartZapret === 'boolean') safe.autoStartZapret = patch.autoStartZapret;
   if (typeof patch.autoUpdateZapret === 'boolean') safe.autoUpdateZapret = patch.autoUpdateZapret;
   if (typeof patch.startMinimized === 'boolean') safe.startMinimized = patch.startMinimized;
+  if (typeof patch.unloadWindowInTray === 'boolean') safe.unloadWindowInTray = patch.unloadWindowInTray;
+  if (typeof patch.ecoMode === 'boolean') safe.ecoMode = patch.ecoMode;
+  if (typeof patch.disableGpu === 'boolean') safe.disableGpu = patch.disableGpu;
+  if (typeof patch.watchdog === 'boolean') safe.watchdog = patch.watchdog;
+  if (typeof patch.toggleHotkey === 'boolean') safe.toggleHotkey = patch.toggleHotkey;
   if (typeof patch.testMode === 'string') safe.testMode = patch.testMode;
   if (['disabled', 'all', 'tcp', 'udp'].includes(patch.gameFilterMode)) safe.gameFilterMode = patch.gameFilterMode;
   if (Number.isFinite(Number(patch.ambientIntensity))) safe.ambientIntensity = clampNumber(patch.ambientIntensity, 0, 100);
   if (Number.isFinite(Number(patch.glassBlur))) safe.glassBlur = clampNumber(patch.glassBlur, 0, 32);
   if (Number.isFinite(Number(patch.motionSpeed))) safe.motionSpeed = clampNumber(patch.motionSpeed, 0, 100);
   return safe;
+}
+
+function sanitizeCustomTheme(theme) {
+  const result = { ...defaultSettings.customTheme };
+  for (const key of ['accent', 'accent2', 'accent3', 'bg']) {
+    const value = theme[key];
+    if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim())) {
+      result[key] = value.trim().toLowerCase();
+    }
+  }
+  return result;
 }
 
 function clampNumber(value, min, max) {
@@ -484,11 +889,59 @@ function ensureRequiredLists() {
   }
 }
 
+function invalidateRuntimeStatus() {
+  runtimeStatus.refreshedAt = 0;
+}
+
+function invalidateServiceCache() {
+  cachedServiceConfigName = undefined;
+}
+
+async function refreshRuntimeStatus(force = false) {
+  const now = Date.now();
+  if (!force && runtimeStatus.refreshedAt && now - runtimeStatus.refreshedAt < RUNTIME_STATUS_TTL_MS) {
+    return runtimeStatus;
+  }
+  if (runtimeStatusPromise) return runtimeStatusPromise;
+
+  runtimeStatusPromise = (async () => {
+    const [running, service] = await Promise.all([getWinwsStatus(), getServiceStatus()]);
+    runtimeStatus = { running: annotateRunning(running, service), service, refreshedAt: Date.now() };
+    return runtimeStatus;
+  })().finally(() => {
+    runtimeStatusPromise = null;
+  });
+
+  return runtimeStatusPromise;
+}
+
+function annotateRunning(running, service) {
+  // Процессы, поднятые нашей службой, тоже считаем своими, а не «внешними».
+  if (!service?.installed || service.state !== 'RUNNING' || !running.processes.length) return running;
+
+  const processes = running.processes.map((processInfo) => ({
+    ...processInfo,
+    managed: true,
+    source: processInfo.managed ? 'zapret' : 'service'
+  }));
+
+  return { ...running, processes, managedCount: processes.length, externalCount: 0 };
+}
+
 async function buildState() {
-  const [running, admin, service] = await Promise.all([
-    getWinwsStatus(),
-    isAdministrator(),
-    getServiceStatus()
+  if (buildStatePromise) return buildStatePromise;
+
+  buildStatePromise = buildStateInner().finally(() => {
+    buildStatePromise = null;
+  });
+
+  return buildStatePromise;
+}
+
+async function buildStateInner() {
+  const [{ running, service }, admin] = await Promise.all([
+    refreshRuntimeStatus(),
+    resolveAdminStatus()
   ]);
 
   return {
@@ -507,18 +960,37 @@ async function buildState() {
     },
     update: lastUpdate,
     appUpdate: lastAppUpdate,
+    hotkey: { combo: TOGGLE_HOTKEY.replace('Control', 'Ctrl'), active: hotkeyRegistered },
     logs: recentLogs.slice(-160)
   };
 }
 
+async function resolveAdminStatus() {
+  if (cachedAdmin !== null) return cachedAdmin;
+  cachedAdmin = await isAdministrator();
+  return cachedAdmin;
+}
+
 function send(channel, payload) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
   }
 }
 
-async function sendState() {
-  send('state:update', await buildState());
+async function sendState(options = {}) {
+  const { refresh = true } = options;
+  if (refresh) invalidateRuntimeStatus();
+
+  // Пока окно скрыто или выгружено, полный state не нужен — обновляем только трей.
+  if (!isWindowVisible()) {
+    await refreshRuntimeStatus();
+    updateTray();
+    return;
+  }
+
+  const state = await buildState();
+  updateTray();
+  send('state:update', state);
 }
 
 function log(message, type = 'info') {
@@ -528,25 +1000,90 @@ function log(message, type = 'info') {
     message: String(message)
   };
   recentLogs.push(entry);
-  if (recentLogs.length > 600) recentLogs = recentLogs.slice(-600);
+  if (recentLogs.length > RECENT_LOGS_LIMIT) recentLogs = recentLogs.slice(-RECENT_LOGS_LIMIT);
 
-  if (logFile) {
-    fs.mkdirSync(path.dirname(logFile), { recursive: true });
-    fs.appendFile(logFile, `[${entry.time}] [${type.toUpperCase()}] ${entry.message}${os.EOL}`, () => {});
-  }
-
+  appendLogFile(`[${entry.time}] [${type.toUpperCase()}] ${entry.message}${os.EOL}`);
   send('log:new', entry);
 }
 
-function readLogFile() {
+function appendLogFile(line) {
+  if (!logFile) return;
+
   try {
-    return fs.readFileSync(logFile, 'utf8');
+    if (logFileBytes === null) {
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      logFileBytes = fs.existsSync(logFile) ? fs.statSync(logFile).size : 0;
+    }
+
+    if (logFileBytes > LOG_MAX_BYTES) {
+      fs.rmSync(`${logFile}.1`, { force: true });
+      fs.renameSync(logFile, `${logFile}.1`);
+      logFileBytes = 0;
+    }
+
+    logFileBytes += Buffer.byteLength(line, 'utf8');
+    fs.appendFile(logFile, line, () => {});
   } catch {
-    return '';
+    logFileBytes = 0;
   }
 }
 
+function readLogFile() {
+  // Читаем только хвост файла: полный лог может весить мегабайты.
+  let handle = null;
+  try {
+    const size = fs.statSync(logFile).size;
+    if (size <= LOG_TAIL_BYTES) return fs.readFileSync(logFile, 'utf8');
+
+    const buffer = Buffer.alloc(LOG_TAIL_BYTES);
+    handle = fs.openSync(logFile, 'r');
+    fs.readSync(handle, buffer, 0, LOG_TAIL_BYTES, size - LOG_TAIL_BYTES);
+    const text = buffer.toString('utf8');
+    return `... (показан последний фрагмент лога)\n${text.slice(text.indexOf('\n') + 1)}`;
+  } catch {
+    return '';
+  } finally {
+    if (handle !== null) {
+      try {
+        fs.closeSync(handle);
+      } catch {}
+    }
+  }
+}
+
+function collectMetrics() {
+  const totals = { main: 0, renderer: 0, other: 0, total: 0 };
+
+  try {
+    for (const metric of app.getAppMetrics()) {
+      const mb = (metric.memory?.workingSetSize || 0) / 1024;
+      totals.total += mb;
+      if (metric.type === 'Browser') totals.main += mb;
+      else if (metric.type === 'Tab' || metric.type === 'Renderer') totals.renderer += mb;
+      else totals.other += mb;
+    }
+  } catch {}
+
+  return {
+    mainMb: Math.round(totals.main),
+    rendererMb: Math.round(totals.renderer),
+    otherMb: Math.round(totals.other),
+    totalMb: Math.round(totals.total),
+    windowLoaded: hasWindow(),
+    pollIntervalMs
+  };
+}
+
 function getConfigs() {
+  // Список .bat меняется только при обновлении zapret — читать каталог на каждый тик незачем.
+  if (configsCache && Date.now() - configsCache.at < CONFIGS_TTL_MS) return configsCache.items;
+
+  const items = readConfigsFromDisk();
+  configsCache = { at: Date.now(), items };
+  return items;
+}
+
+function readConfigsFromDisk() {
   try {
     return fs.readdirSync(rootDir)
       .filter((name) => /^general.*\.bat$/i.test(name))
@@ -773,11 +1310,19 @@ async function startZapretInner(configName, options = {}) {
     log(`winws.exe не стартовал: ${error.message}`, 'error');
   });
   winwsChild.on('exit', (code, signal) => {
+    const child = winwsChild;
     log(`winws.exe остановлен: code=${code ?? 'null'} signal=${signal ?? 'null'}`);
     winwsChild = null;
-    sendState();
+    child?.stdout?.removeAllListeners();
+    child?.stderr?.removeAllListeners();
+
+    if (!intentionalStop && !isQuitting && settings.watchdog) {
+      triggerWatchdogRestart(`winws.exe завершился (code=${code ?? 'null'})`);
+    }
+    sendState().catch(() => {});
   });
 
+  lastActiveConfig = config.name;
   await delay(500);
   await sendState();
   return config;
@@ -786,24 +1331,36 @@ async function startZapretInner(configName, options = {}) {
 async function stopZapretProcesses(options = {}) {
   const { stopService = true, quiet = false, killProcesses = true } = options;
 
-  if (winwsChild && !winwsChild.killed) {
-    try {
-      winwsChild.kill('SIGTERM');
-    } catch {}
-  }
-  winwsChild = null;
-
-  if (stopService) {
-    await execFileQuiet('sc.exe', ['stop', SERVICE_NAME], 6000);
+  intentionalStop = true;
+  if (watchdogTimer) {
+    clearTimeout(watchdogTimer);
+    watchdogTimer = null;
   }
 
-  if (killProcesses) {
-    const script = `Get-CimInstance Win32_Process -Filter "Name='winws.exe'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
-    await execFileQuiet('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], 10000);
-  }
+  try {
+    if (winwsChild && !winwsChild.killed) {
+      try {
+        winwsChild.kill('SIGTERM');
+      } catch {}
+    }
+    winwsChild = null;
 
-  if (!quiet) log('zapret остановлен');
-  await sendState();
+    if (stopService) {
+      await execFileQuiet('sc.exe', ['stop', SERVICE_NAME], 6000);
+    }
+
+    if (killProcesses) {
+      // taskkill вместо powershell: тот же результат за доли памяти и времени.
+      await execFileQuiet('taskkill.exe', ['/IM', 'winws.exe', '/F'], 8000);
+    }
+
+    if (!quiet) log('zapret остановлен');
+    await sendState();
+  } finally {
+    setTimeout(() => {
+      intentionalStop = false;
+    }, 3000).unref?.();
+  }
 }
 
 async function enableTcpTimestamps() {
@@ -811,37 +1368,56 @@ async function enableTcpTimestamps() {
 }
 
 async function getWinwsStatus() {
-  const script = `Get-CimInstance Win32_Process -Filter "Name='winws.exe'" | Select-Object ProcessId,CommandLine,ExecutablePath | ConvertTo-Json -Compress`;
-
+  // tasklist.exe стоит ~2 МБ и миллисекунды CPU, powershell.exe — десятки мегабайт на каждый опрос.
   try {
-    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { timeout: 7000 });
-    const text = stdout.trim();
-    if (!text) return { active: false, processes: [], managedCount: 0, externalCount: 0 };
-    const data = JSON.parse(text);
-    const processes = (Array.isArray(data) ? data : [data]).map(normalizeWinwsProcess);
+    const { stdout } = await execFileAsync('tasklist.exe', ['/FI', 'IMAGENAME eq winws.exe', '/NH', '/FO', 'CSV'], {
+      timeout: 5000,
+      maxBuffer: 256 * 1024
+    });
+    const processes = parseTasklistCsv(stdout).map(normalizeWinwsProcess);
     const managedCount = processes.filter((processInfo) => processInfo.managed).length;
     return {
       active: processes.length > 0,
       processes,
       managedCount,
-      externalCount: processes.length - managedCount
+      externalCount: processes.length - managedCount,
+      memoryKb: processes.reduce((sum, item) => sum + (item.MemoryKb || 0), 0)
     };
   } catch {
+    const alive = Boolean(winwsChild && !winwsChild.killed);
     return {
-      active: Boolean(winwsChild),
-      processes: winwsChild ? [{ ProcessId: winwsChild.pid, CommandLine: 'started by app', managed: true }] : [],
-      managedCount: winwsChild ? 1 : 0,
-      externalCount: 0
+      active: alive,
+      processes: alive ? [{ ProcessId: winwsChild.pid, managed: true, source: 'zapret' }] : [],
+      managedCount: alive ? 1 : 0,
+      externalCount: 0,
+      memoryKb: 0
     };
   }
 }
 
+function parseTasklistCsv(stdout) {
+  const rows = [];
+
+  for (const line of String(stdout).split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || !/^"winws\.exe"/i.test(trimmed)) continue;
+
+    const cells = trimmed.split('","').map((cell) => cell.replace(/^"|"$/g, ''));
+    const pid = Number(cells[1]);
+    if (!Number.isFinite(pid)) continue;
+
+    rows.push({
+      ProcessId: pid,
+      SessionName: cells[2] || '',
+      MemoryKb: Number(String(cells[4] || '').replace(/[^\d]/g, '')) || 0
+    });
+  }
+
+  return rows;
+}
+
 function normalizeWinwsProcess(processInfo) {
-  const executablePath = processInfo.ExecutablePath || processInfo.executablePath || '';
-  const normalizedExe = path.normalize(executablePath).toLowerCase();
-  const normalizedRoot = path.normalize(rootDir).toLowerCase();
-  const normalizedWinws = path.normalize(winwsExe).toLowerCase();
-  const managed = normalizedExe === normalizedWinws || normalizedExe.startsWith(`${normalizedRoot}${path.sep}`);
+  const managed = Boolean(winwsChild && !winwsChild.killed && winwsChild.pid === processInfo.ProcessId);
 
   return {
     ...processInfo,
@@ -894,6 +1470,8 @@ function parseServiceState(stdout) {
 }
 
 async function readServiceConfigName() {
+  if (cachedServiceConfigName !== undefined) return cachedServiceConfigName;
+
   try {
     const { stdout } = await execFileAsync('reg.exe', [
       'query',
@@ -902,9 +1480,14 @@ async function readServiceConfigName() {
       'zapret-discord-youtube'
     ], { timeout: 5000 });
     const raw = stdout.match(/zapret-discord-youtube\s+REG_SZ\s+(.+)/i)?.[1]?.trim();
-    if (!raw) return null;
-    return /\.bat$/i.test(raw) ? raw : `${raw}.bat`;
+    if (!raw) {
+      cachedServiceConfigName = null;
+      return null;
+    }
+    cachedServiceConfigName = /\.bat$/i.test(raw) ? raw : `${raw}.bat`;
+    return cachedServiceConfigName;
   } catch {
+    cachedServiceConfigName = null;
     return null;
   }
 }
@@ -1040,10 +1623,6 @@ async function checkForZapretUpdate(options = {}) {
   return lastUpdate;
 }
 
-function setupAppUpdater() {
-  // Проверка запускается после загрузки окна в createWindow().
-}
-
 async function fetchLatestAppVersion() {
   const errors = [];
 
@@ -1151,6 +1730,14 @@ async function checkForAppUpdate() {
       return lastAppUpdate;
     }
 
+    if (lastAppUpdate.status === 'downloaded'
+      && lastAppUpdate.version === latestVersion
+      && pendingAppInstallerPath
+      && fs.existsSync(pendingAppInstallerPath)) {
+      sendAppUpdateProgress();
+      return lastAppUpdate;
+    }
+
     lastAppUpdate = {
       status: 'available',
       version: latestVersion,
@@ -1214,25 +1801,37 @@ async function applyZapretUpdate(latestVersion) {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'zapret-update-'));
   const zipPath = path.join(tempRoot, asset.name);
   const extractDir = path.join(tempRoot, 'extract');
-  await downloadFile(asset.browser_download_url, zipPath);
 
-  lastUpdate = { ...lastUpdate, status: 'installing', message: 'Распаковываю и применяю обновление' };
-  send('update:progress', lastUpdate);
+  try {
+    await downloadFile(asset.browser_download_url, zipPath);
 
-  await execFileAsync('powershell.exe', [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-Command',
-    `Expand-Archive -LiteralPath ${quotePowerShellSingle(zipPath)} -DestinationPath ${quotePowerShellSingle(extractDir)} -Force`
-  ], { timeout: 120000 });
+    lastUpdate = { ...lastUpdate, status: 'installing', message: 'Распаковываю и применяю обновление' };
+    send('update:progress', lastUpdate);
 
-  const extractedRoot = findExtractedZapretRoot(extractDir);
-  if (!extractedRoot) throw new Error('В архиве не найден service.bat');
+    await execFileAsync('powershell.exe', [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      `Expand-Archive -LiteralPath ${quotePowerShellSingle(zipPath)} -DestinationPath ${quotePowerShellSingle(extractDir)} -Force`
+    ], { timeout: 120000 });
 
-  backupZapretFiles();
-  applyUpdateFiles(extractedRoot);
-  ensureRequiredLists();
+    const extractedRoot = findExtractedZapretRoot(extractDir);
+    if (!extractedRoot) throw new Error('В архиве не найден service.bat');
+
+    backupZapretFiles();
+    applyUpdateFiles(extractedRoot);
+    ensureRequiredLists();
+    configsCache = null;
+    trayMenuSignature = null;
+  } finally {
+    // Архив и распакованные файлы иначе навсегда остаются в %TEMP%.
+    try {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    } catch {}
+  }
+
+  pruneOldBackups();
 
   lastUpdate = {
     status: 'updated',
@@ -1277,6 +1876,22 @@ function backupZapretFiles() {
   }
 
   log(`Резервная копия zapret: ${backupDir}`);
+}
+
+function pruneOldBackups(keep = 3) {
+  // Каждая копия — это полный bin/lists/utils, за десяток обновлений набегают сотни мегабайт.
+  try {
+    const root = path.join(rootDir, '.zapret-backups');
+    const dirs = fs.readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+
+    for (const name of dirs.slice(0, Math.max(0, dirs.length - keep))) {
+      fs.rmSync(path.join(root, name), { recursive: true, force: true });
+      log(`Удалена старая резервная копия: ${name}`);
+    }
+  } catch {}
 }
 
 function applyUpdateFiles(sourceRoot) {
@@ -1391,6 +2006,8 @@ function copyDirFiltered(source, target, filter = () => true) {
 
 async function runConfigTests(options) {
   activeTest = { cancelled: false };
+  cancelWindowUnload();
+  scheduleStatusPoll(true);
   const mode = options.mode || settings.testMode || 'fast';
   const applyBest = options.applyBest !== false;
   const configs = getConfigs();
@@ -1434,6 +2051,7 @@ async function runConfigTests(options) {
   } finally {
     const cancelled = activeTest?.cancelled;
     activeTest = null;
+    scheduleStatusPoll(true);
     if (cancelled) {
       log('Тесты остановлены пользователем', 'warn');
       if (wasRunning) await startZapret(previousConfig, { remember: false, reason: 'restore', useService: false });
@@ -1599,7 +2217,15 @@ function fetchText(url, redirects = 0) {
 
       let data = '';
       response.setEncoding('utf8');
-      response.on('data', (chunk) => { data += chunk; });
+      response.on('data', (chunk) => {
+        data += chunk;
+        // Защита от бесконечного ответа: версия/JSON релиза никогда не бывают такими большими.
+        if (data.length > 4 * 1024 * 1024) {
+          response.destroy();
+          reject(new Error('Ответ слишком большой'));
+        }
+      });
+      response.on('error', reject);
       response.on('end', () => resolve(data));
     });
     request.setTimeout(12000, () => request.destroy(new Error('Timeout')));
@@ -1614,38 +2240,68 @@ async function fetchJson(url) {
 function downloadFile(url, target, redirects = 0, onProgress = null) {
   return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(target), { recursive: true });
+
     const file = fs.createWriteStream(target);
+    let settled = false;
+
+    const cleanup = (removeFile) => {
+      if (file.destroyed) return;
+      file.destroy();
+      if (removeFile) {
+        try {
+          fs.rmSync(target, { force: true });
+        } catch {}
+      }
+    };
+
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup(true);
+      reject(error);
+    };
+
+    const succeed = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    // Без этого обработчика ошибка записи на диск валит весь процесс.
+    file.on('error', fail);
+
     const request = https.get(url, { headers: { 'User-Agent': APP_NAME } }, (response) => {
       if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location && redirects < 5) {
-        file.close();
-        fs.rmSync(target, { force: true });
+        cleanup(true);
         response.resume();
-        resolve(downloadFile(new URL(response.headers.location, url).toString(), target, redirects + 1, onProgress));
+        succeed(downloadFile(new URL(response.headers.location, url).toString(), target, redirects + 1, onProgress));
         return;
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        file.close();
-        fs.rmSync(target, { force: true });
         response.resume();
-        reject(new Error(`HTTP ${response.statusCode}`));
+        fail(new Error(`HTTP ${response.statusCode}`));
         return;
       }
 
       const total = Number(response.headers['content-length'] || 0);
       let loaded = 0;
+      let lastReported = 0;
+
       response.on('data', (chunk) => {
         loaded += chunk.length;
-        if (typeof onProgress === 'function') onProgress(loaded, total);
+        // Репортим не чаще, чем раз в 250 КБ, чтобы не забивать IPC.
+        if (typeof onProgress === 'function' && (loaded - lastReported > 256 * 1024 || loaded === total)) {
+          lastReported = loaded;
+          onProgress(loaded, total);
+        }
       });
+      response.on('error', fail);
       response.pipe(file);
-      file.on('finish', () => file.close(resolve));
+      file.on('finish', () => file.close(() => succeed()));
     });
+
     request.setTimeout(120000, () => request.destroy(new Error('Timeout')));
-    request.on('error', (error) => {
-      file.close();
-      fs.rmSync(target, { force: true });
-      reject(error);
-    });
+    request.on('error', fail);
   });
 }
 
@@ -1746,6 +2402,7 @@ async function installZapretService(configName) {
     settings.selectedConfig = config.name;
     saveSettings();
     log(`Windows service installed through UAC: ${config.name}`);
+    invalidateServiceCache();
     await sendState();
     return;
   }
@@ -1780,6 +2437,7 @@ async function installZapretService(configName) {
   settings.bestConfig = config.name;
   settings.selectedConfig = config.name;
   saveSettings();
+  invalidateServiceCache();
   log(`Windows service installed: ${config.name}`);
   await sendState();
 }
@@ -1790,6 +2448,7 @@ async function removeZapretService() {
   if (!admin) {
     await runElevatedServiceRemove();
     log('Windows service removed through UAC');
+    invalidateServiceCache();
     await sendState();
     return;
   }
@@ -1800,6 +2459,7 @@ async function removeZapretService() {
   await execFileQuiet('sc.exe', ['delete', 'WinDivert'], 7000);
   await execFileQuiet('sc.exe', ['stop', 'WinDivert14'], 7000);
   await execFileQuiet('sc.exe', ['delete', 'WinDivert14'], 7000);
+  invalidateServiceCache();
   log('Windows service removed');
   await sendState();
 }

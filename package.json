@@ -1,6 +1,6 @@
 {
   "name": "zapret-control-center",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "private": true,
   "author": "Zapret Team",
   "description": "Electron control center for Flowseal zapret-discord-youtube.",
@@ -23,6 +23,11 @@
         "owner": "thetunix",
         "repo": "Zapret-Control"
       }
+    ],
+    "files": [
+      "src/**/*",
+      "app-version.txt",
+      "package.json"
     ],
     "win": {
       "target": ["nsis"]
