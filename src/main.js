@@ -610,6 +610,15 @@ function cleanupStaleInstallers() {
       if (Date.now() - stat.mtimeMs > 24 * 60 * 60 * 1000) fs.rmSync(file, { force: true });
     }
   } catch {}
+
+  // Скрипты установки службы удаляются сразу, но после аварийного выхода могут остаться.
+  try {
+    const dir = resolveElevatedScriptDir();
+    for (const name of fs.readdirSync(dir)) {
+      const file = path.join(dir, name);
+      if (Date.now() - fs.statSync(file).mtimeMs > 60 * 60 * 1000) fs.rmSync(file, { force: true });
+    }
+  } catch {}
 }
 
 function registerIpc() {
@@ -1281,7 +1290,7 @@ async function startZapretInner(configName, options = {}) {
   }
 
   if (!await isAdministrator()) {
-    throw new Error('First setup needs administrator rights. Open Settings, click Install in Windows Service, and approve UAC once.');
+    throw new Error('Для первого запуска нужны права администратора. Откройте «Настройки» → «Служба Windows» → «Установить» и подтвердите запрос UAC — дальше zapret будет стартовать сам.');
   }
 
   await stopZapretProcesses({ stopService: true, quiet: true });
@@ -2362,8 +2371,12 @@ function formatServiceBinPath(config) {
 }
 
 function formatServiceBinPathForBatch(config) {
-  const argsText = config.args.map(quoteCommandArg).join(' ');
-  return `\\"${quoteBatchValue(config.exe)}\\" ${argsText}`;
+  // Значение уходит внутрь двойных кавычек в .cmd, поэтому каждая кавычка внутри
+  // должна быть экранирована. Иначе на пути с пробелами («Zapret Control Center»)
+  // sc.exe получает binPath, разорванный на несколько аргументов.
+  return formatServiceBinPath(config)
+    .replace(/%/g, '%%')
+    .replace(/"/g, '\\"');
 }
 
 function quoteCommandArg(arg) {
@@ -2409,17 +2422,9 @@ async function installZapretService(configName) {
 
   await stopZapretProcesses({ stopService: true, quiet: true });
   await execFileQuiet('sc.exe', ['delete', SERVICE_NAME], 5000);
+  await delay(1200);
   await enableTcpTimestamps();
-  await execFileAsync('sc.exe', [
-    'create',
-    SERVICE_NAME,
-    'binPath=',
-    formatServiceBinPath(config),
-    'DisplayName=',
-    SERVICE_NAME,
-    'start=',
-    'auto'
-  ], { timeout: 10000 });
+  await runServiceCommand(['create', SERVICE_NAME, 'binPath=', formatServiceBinPath(config), 'DisplayName=', SERVICE_NAME, 'start=', 'auto']);
   await execFileQuiet('sc.exe', ['description', SERVICE_NAME, 'Zapret DPI bypass software'], 5000);
   await execFileQuiet('sc.exe', ['sdset', SERVICE_NAME, SERVICE_SDDL], 5000);
   await execFileQuiet('reg.exe', [
@@ -2433,7 +2438,7 @@ async function installZapretService(configName) {
     config.name.replace(/\.bat$/i, ''),
     '/f'
   ], 5000);
-  await execFileAsync('sc.exe', ['start', SERVICE_NAME], { timeout: 10000 });
+  await runServiceCommand(['start', SERVICE_NAME]);
   settings.bestConfig = config.name;
   settings.selectedConfig = config.name;
   saveSettings();
@@ -2470,18 +2475,31 @@ async function runElevatedServiceInstall(config) {
   const lines = [
     'sc stop zapret >nul 2>&1',
     'sc delete zapret >nul 2>&1',
-    'ping -n 2 127.0.0.1 >nul',
+    'ping -n 3 127.0.0.1 >nul',
     'taskkill /IM winws.exe /F >nul 2>&1',
     'netsh interface tcp set global timestamps=enabled >nul 2>&1',
     `sc create ${SERVICE_NAME} binPath= "${binPathArg}" DisplayName= "${SERVICE_NAME}" start= auto`,
-    'if errorlevel 1 goto :failed',
+    'if errorlevel 1 exit /b %errorlevel%',
     `sc description ${SERVICE_NAME} "Zapret DPI bypass software"`,
     `sc sdset ${SERVICE_NAME} "${SERVICE_SDDL}" >nul 2>&1`,
     `reg add "HKLM\\System\\CurrentControlSet\\Services\\${SERVICE_NAME}" /v zapret-discord-youtube /t REG_SZ /d "${configBaseName}" /f >nul`,
     `sc start ${SERVICE_NAME}`,
-    'if errorlevel 1 goto :failed'
+    'if errorlevel 1 exit /b %errorlevel%'
   ];
-  await runElevatedBatchScript(lines, 'install-service', { strict: false });
+
+  try {
+    await runElevatedBatchScript(lines, 'install-service');
+  } catch (error) {
+    // Скрипт мог отработать, а рапорт потеряться (перехват антивирусом, гонка с UAC).
+    // Прежде чем показывать ошибку, спрашиваем саму систему.
+    invalidateServiceCache();
+    const service = await getServiceStatus();
+    if (service.installed && service.state === 'RUNNING') {
+      log(`Служба установилась, но скрипт вернул ошибку: ${error.message}`, 'warn');
+      return;
+    }
+    throw error;
+  }
 }
 
 async function runElevatedServiceRemove() {
@@ -2494,36 +2512,45 @@ async function runElevatedServiceRemove() {
     'sc stop WinDivert14 >nul 2>&1',
     'sc delete WinDivert14 >nul 2>&1'
   ];
-  await runElevatedBatchScript(lines, 'remove-service', { strict: false });
+
+  try {
+    await runElevatedBatchScript(lines, 'remove-service');
+  } catch (error) {
+    invalidateServiceCache();
+    const service = await getServiceStatus();
+    if (!service.installed) {
+      log(`Служба удалена, но скрипт вернул ошибку: ${error.message}`, 'warn');
+      return;
+    }
+    throw error;
+  }
 }
 
-async function runElevatedBatchScript(lines, name, options = {}) {
-  const strict = options.strict !== false;
-  const dir = path.join(app.getPath('userData'), 'elevated');
-  fs.mkdirSync(dir, { recursive: true });
+async function runElevatedBatchScript(lines, name) {
+  const dir = resolveElevatedScriptDir();
   const stamp = Date.now();
   const scriptPath = path.join(dir, `${name}-${stamp}.cmd`);
   const logPath = path.join(dir, `${name}-${stamp}.log`);
+  const transcriptPath = path.join(dir, `${name}-${stamp}.out`);
+
+  // chcp 65001: путь установки может содержать кириллицу (C:\Users\Иван\AppData\...),
+  // а в кодировке 437 sc.exe получал искалеченный binPath и служба не стартовала.
   const scriptBody = [
     '@echo off',
-    'chcp 437 >nul',
-    ...lines
-  ];
-
-  if (strict) {
-    scriptBody.push('if errorlevel 1 goto :failed');
-  }
-
-  scriptBody.push(
-    `echo OK>"${logPath}"`,
-    'exit /b 0',
-    ':failed',
-    `echo FAILED %ERRORLEVEL%>"${logPath}"`,
+    'chcp 65001 >nul',
+    `call :main >"${transcriptPath}" 2>&1`,
+    'set "RC=%ERRORLEVEL%"',
+    `if "%RC%"=="0" (echo OK>"${logPath}") else (echo FAILED %RC%>"${logPath}")`,
+    'exit /b %RC%',
+    ':main',
+    ...lines,
     'exit /b %ERRORLEVEL%'
-  );
+  ];
   fs.writeFileSync(scriptPath, scriptBody.join('\r\n'), 'utf8');
 
-  const elevateExe = resolveElevateExe();
+  // elevate.exe склеивает аргументы без кавычек, поэтому путь с пробелом
+  // (например, C:\Users\John Smith\...) отдаём в PowerShell.
+  const elevateExe = /\s/.test(scriptPath) ? null : resolveElevateExe();
   let elevationError = null;
 
   try {
@@ -2547,25 +2574,24 @@ async function runElevatedBatchScript(lines, name, options = {}) {
   await delay(250);
 
   let detail = '';
+  let transcript = '';
   try {
     if (fs.existsSync(logPath)) detail = fs.readFileSync(logPath, 'utf8').trim();
   } catch {}
+  try {
+    if (fs.existsSync(transcriptPath)) transcript = fs.readFileSync(transcriptPath, 'utf8').trim();
+  } catch {}
+
+  // Без этого при жалобе «вылезла ошибка» невозможно понять, что именно сказал sc.exe.
+  if (transcript) {
+    for (const line of splitLines(transcript).slice(-8)) log(`[${name}] ${line}`);
+  }
 
   try {
     if (detail === 'OK') return;
 
     if (detail.startsWith('FAILED')) {
-      const code = detail.replace(/^FAILED\s*/, '').trim();
-      if (code === '1223') {
-        throw new Error('Запрос UAC был отклонён. Нажмите «Установить» ещё раз и подтвердите окно контроля учётных записей.');
-      }
-      if (code === '1060') {
-        throw new Error('Служба не найдена (код 1060). Попробуйте установить ещё раз — если ошибка повторится, перезапустите приложение от администратора.');
-      }
-      if (code === '1072') {
-        throw new Error('Служба помечена для удаления (код 1072). Подождите 10 секунд и нажмите «Установить» снова.');
-      }
-      throw new Error(`Ошибка установки службы (код ${code || 'unknown'}). Убедитесь, что другой bypass не мешает.`);
+      throw new Error(describeServiceError(detail.replace(/^FAILED\s*/, '').trim(), transcript));
     }
 
     if (!detail && elevationError) {
@@ -2579,7 +2605,62 @@ async function runElevatedBatchScript(lines, name, options = {}) {
   } finally {
     fs.rm(scriptPath, { force: true }, () => {});
     fs.rm(logPath, { force: true }, () => {});
+    fs.rm(transcriptPath, { force: true }, () => {});
   }
+}
+
+async function runServiceCommand(args) {
+  try {
+    return await execFileAsync('sc.exe', args, { timeout: 15000 });
+  } catch (error) {
+    const output = `${error.stdout || ''}\n${error.stderr || ''}`.trim();
+    if (output) for (const line of splitLines(output).slice(-6)) log(`[sc ${args[0]}] ${line}`, 'warn');
+    throw new Error(describeServiceError(error.code, output));
+  }
+}
+
+function describeServiceError(code, transcript = '') {
+  const messages = {
+    2: 'Windows не нашла winws.exe (код 2). Проверьте, что антивирус не удалил файл из папки zapret\\bin.',
+    5: 'Отказано в доступе (код 5). Запустите приложение от имени администратора.',
+    577: 'Windows не приняла драйвер WinDivert (код 577). Отключите проверку подписи драйверов или временно приостановите антивирус.',
+    1053: 'Служба не ответила вовремя (код 1053). Обычно это блокировка антивирусом или конфликт с другим обходом DPI.',
+    1058: 'Служба отключена в Windows (код 1058). Включите её в services.msc или удалите и установите заново.',
+    1060: 'Служба не найдена (код 1060). Нажмите «Установить» ещё раз — если повторится, перезапустите приложение от администратора.',
+    1072: 'Служба помечена для удаления (код 1072). Подождите 10 секунд и нажмите «Установить» снова.',
+    1073: 'Служба уже существует (код 1073). Нажмите «Удалить», затем «Установить».',
+    1223: 'Запрос UAC был отклонён. Нажмите «Установить» ещё раз и подтвердите окно контроля учётных записей.',
+    1275: 'Драйвер WinDivert заблокирован политикой Windows (код 1275). Проверьте Secure Boot и антивирус.'
+  };
+
+  const known = messages[Number(code)];
+  if (known) return known;
+
+  // Последняя строка вывода sc.exe обычно и есть настоящая причина.
+  const lastLine = splitLines(transcript).filter((line) => !/^\[SC\]\s*$/.test(line)).slice(-1)[0];
+  const suffix = lastLine ? ` Ответ Windows: ${lastLine}` : ' Убедитесь, что другой обход DPI не мешает.';
+  return `Ошибка установки службы (код ${code || 'неизвестен'}).${suffix}`;
+}
+
+function resolveElevatedScriptDir() {
+  // ProgramData даёт путь без пробелов и без кириллицы — на нём не спотыкаются
+  // ни elevate.exe, ни cmd.exe с чужой кодовой страницей.
+  const candidates = [
+    path.join(process.env.ProgramData || 'C:\\ProgramData', 'ZapretControl', 'elevated'),
+    path.join(app.getPath('userData'), 'elevated')
+  ];
+
+  for (const dir of candidates) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.accessSync(dir, fs.constants.W_OK);
+      return dir;
+    } catch {}
+  }
+
+  const fallback = path.join(app.getPath('userData'), 'elevated');
+  fs.mkdirSync(fallback, { recursive: true });
+  return fallback;
 }
 
 function resolveElevateExe() {

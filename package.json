@@ -21,7 +21,8 @@
       {
         "provider": "github",
         "owner": "thetunix",
-        "repo": "Zapret-Control"
+        "repo": "Zapret-Control",
+        "releaseType": "release"
       }
     ],
     "files": [
