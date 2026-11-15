@@ -76,4 +76,4 @@ jobs:
             --latest=false `
             --target "$env:GITHUB_SHA" `
             --title "Zapret Control Center $env:BETA_VERSION (Beta)" `
-            --notes "Beta update: moves the compact Discord connectivity tile to the bottom center of the home screen while keeping the existing centered power button and status/log panels. Stable 0.2.8 remains available."
+            --notes "Beta update: restored YouTube and Discord status on the home screen, replaced Google control with Cloudflare DNS, and bundled the 1.1.1.1 and 1.0.0.1 Cloudflare resolver endpoints. Stable 0.2.8 remains available."

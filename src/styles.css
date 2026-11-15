@@ -778,7 +778,7 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 .service-logo { display: block; width: 25px; height: 25px; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-position: center; mask-position: center; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
 .service-logo-youtube { background: #ff0033; -webkit-mask-image: url('assets/icons/youtube.svg'); mask-image: url('assets/icons/youtube.svg'); }
 .service-logo-discord { background: #5865f2; -webkit-mask-image: url('assets/icons/discord.svg'); mask-image: url('assets/icons/discord.svg'); }
-.service-logo-google { background: #4285f4; -webkit-mask-image: url('assets/icons/google.svg'); mask-image: url('assets/icons/google.svg'); }
+.service-logo-cloudflare { background: #f38020; -webkit-mask-image: url('assets/icons/cloudflare.svg'); mask-image: url('assets/icons/cloudflare.svg'); }
 .service-indicator { position: absolute; right: -3px; bottom: -2px; width: 8px; height: 8px; border: 1px solid var(--surface-2); border-radius: 50%; background: var(--muted); }
 .service-ok .service-indicator { background: var(--good); }
 .service-fail .service-indicator { background: var(--danger); }

@@ -2330,9 +2330,9 @@ async function testTargets(targets, onTarget) {
   return results;
 }
 
-async function runCurlCheck(url, label, protocolArgs) {
+async function runCurlCheck(url, label, protocolArgs, { get = false } = {}) {
   try {
-    const args = ['-I', '-L', '-sS', '--connect-timeout', '4', '-m', '6', '-o', process.platform === 'win32' ? 'NUL' : '/dev/null', '-w', '%{http_code} %{time_total}', ...protocolArgs, url];
+    const args = [...(get ? [] : ['-I']), '-L', '-sS', '--connect-timeout', '4', '-m', '6', '-o', process.platform === 'win32' ? 'NUL' : '/dev/null', '-w', '%{http_code} %{time_total}', ...protocolArgs, url];
     const { stdout } = await execFileAsync('curl.exe', args, { timeout: 8000 });
     const [code, seconds] = stdout.trim().split(/\s+/);
     return { label, ok: isHttpHealthy(code), code, ms: Number.isFinite(+seconds) ? Math.round(+seconds * 1000) : null };
@@ -2397,8 +2397,21 @@ function scheduleMonitor(delay = MONITOR_INTERVAL_MS) {
 
 async function probeServices() {
   const results = await Promise.all(TARGET_SERVICES.map(async (target) => {
-    const check = await runCurlCheck(target.url, 'HTTPS', ['--http1.1']);
-    return [target.id, { name: target.name, ok: check.ok, code: check.code, ms: check.ms }];
+    let check;
+    if (target.servers) {
+      // Cloudflare's primary and secondary resolver IPs are bundled; no user configuration needed.
+      for (const server of target.servers) {
+        const result = await runCurlCheck(target.url, 'HTTPS', [
+          '--http1.1', '-H', 'accept: application/dns-json',
+          '--resolve', `cloudflare-dns.com:443:${server}`
+        ], { get: true });
+        check = { ...result, server };
+        if (check.ok) break;
+      }
+    } else {
+      check = await runCurlCheck(target.url, 'HTTPS', ['--http1.1']);
+    }
+    return [target.id, { name: target.name, ok: check.ok, code: check.code, ms: check.ms, server: check.server || null }];
   }));
   return Object.fromEntries(results);
 }
@@ -2413,13 +2426,13 @@ async function runMonitor({ force = false } = {}) {
   monitorInFlight = (async () => {
     const services = await probeServices();
     const failed = ['youtube', 'discord'].filter((id) => services[id]?.ok === false);
-    failedCheckStreak = services.google?.ok && failed.length ? failedCheckStreak + 1 : 0;
+    failedCheckStreak = services.cloudflare?.ok && failed.length ? failedCheckStreak + 1 : 0;
     monitorState = {
       ...monitorState,
       checking: false,
       checkedAt: Date.now(),
       services,
-      message: !services.google?.ok ? 'Контрольный сайт недоступен: проверьте интернет'
+      message: !services.cloudflare?.ok ? 'Cloudflare DNS недоступен: проверьте интернет'
         : failed.length ? `Недоступно: ${failed.join(', ')}` : 'Проверенные сайты отвечают'
     };
     send('monitor:update', monitorState);
@@ -2470,7 +2483,7 @@ async function attemptSmartSwitch(failed) {
     await startZapret(candidate.config, { remember: true, reason: 'smart-switch' });
     await delay(4000);
     const nextServices = await probeServices();
-    const improved = nextServices.google?.ok && failed.some((id) => nextServices[id]?.ok);
+    const improved = nextServices.cloudflare?.ok && failed.some((id) => nextServices[id]?.ok);
     if (!improved) throw new Error('Доступность сервисов не улучшилась');
     monitorState.services = nextServices;
     monitorState.checkedAt = Date.now();

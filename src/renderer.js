@@ -924,16 +924,15 @@ function renderMonitor() {
 
   for (const container of [$('#homeServiceCards'), $('#monitorServiceCards')]) {
     container.textContent = '';
-    const services = container.id === 'homeServiceCards'
-      ? [['discord', 'Discord']]
-      : [['youtube', 'YouTube'], ['discord', 'Discord'], ['google', 'Google · контроль']];
+    const services = [['youtube', 'YouTube'], ['discord', 'Discord'], ['cloudflare', 'Cloudflare DNS']];
     for (const [id, label] of services) {
       const result = monitor.services?.[id];
       const card = makeElement('div', `service-card ${result ? result.ok ? 'service-ok' : 'service-fail' : 'service-unknown'}`);
       const availability = !result ? 'Не проверялся' : result.ok ? 'Доступен' : 'Недоступен';
       const latency = result?.ok && Number.isFinite(result.ms) ? `${Math.round(result.ms)} мс` : '— мс';
       const code = result?.code ? `, HTTP ${result.code}` : '';
-      card.title = `${label}: ${availability}, задержка HTTPS: ${latency}${code}`;
+      const server = result?.server ? `, сервер ${result.server}` : '';
+      card.title = `${label}: ${availability}, задержка HTTPS: ${latency}${code}${server}`;
       card.setAttribute('role', 'status');
       card.setAttribute('aria-label', card.title);
 

@@ -1,7 +1,14 @@
+const CLOUDFLARE_DNS_SERVERS = Object.freeze(['1.1.1.1', '1.0.0.1']);
+
 const TARGET_SERVICES = Object.freeze([
   { id: 'youtube', name: 'YouTube', url: 'https://www.youtube.com/' },
   { id: 'discord', name: 'Discord', url: 'https://discord.com/app' },
-  { id: 'google', name: 'Google (контроль)', url: 'https://www.google.com/' }
+  {
+    id: 'cloudflare',
+    name: 'Cloudflare (контроль)',
+    url: 'https://cloudflare-dns.com/dns-query?name=example.com&type=A',
+    servers: CLOUDFLARE_DNS_SERVERS
+  }
 ]);
 
 function summarizeStrategy(result, checkedAt = Date.now()) {
@@ -38,7 +45,7 @@ function pickAlternative(history, availableNames, currentName, failedServices, s
   return eligible[0] || null;
 }
 
-function shouldSuggestSwitch(services, streak, enabled, baseline = 'google') {
+function shouldSuggestSwitch(services, streak, enabled, baseline = 'cloudflare') {
   if (!enabled || streak < 2 || !services?.[baseline]?.ok) return false;
   return ['youtube', 'discord'].some((id) => services[id]?.ok === false);
 }
@@ -48,4 +55,4 @@ function isHttpHealthy(statusCode) {
   return Number.isInteger(status) && status >= 200 && status < 400;
 }
 
-module.exports = { TARGET_SERVICES, summarizeStrategy, pickAlternative, shouldSuggestSwitch, isHttpHealthy };
+module.exports = { CLOUDFLARE_DNS_SERVERS, TARGET_SERVICES, summarizeStrategy, pickAlternative, shouldSuggestSwitch, isHttpHealthy };

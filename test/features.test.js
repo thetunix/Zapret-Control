@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { describeStrategy, buildStrategy, customStrategyFilename } = require('../src/strategy-editor');
-const { summarizeStrategy, pickAlternative, shouldSuggestSwitch, isHttpHealthy } = require('../src/smart-routing');
+const { CLOUDFLARE_DNS_SERVERS, TARGET_SERVICES, summarizeStrategy, pickAlternative, shouldSuggestSwitch, isHttpHealthy } = require('../src/smart-routing');
 
 const sample = fs.readFileSync(path.join(__dirname, '../zapret/general.bat'), 'utf8');
 const binFiles = ['tls_clienthello_www_google_com.bin', 'stun.bin'];
@@ -59,9 +59,16 @@ test('smart switching requires known service success and an online control site'
   assert.equal(pickAlternative([second, first], available, 'general.bat', ['discord']).config, first.config);
   assert.equal(pickAlternative([second, first], available, 'general.bat', ['youtube']).config, second.config);
   assert.equal(pickAlternative([second, first], available, 'general.bat', ['other']), null);
-  assert.equal(shouldSuggestSwitch({ google: { ok: true }, discord: { ok: false } }, 2, true), true);
-  assert.equal(shouldSuggestSwitch({ google: { ok: false }, discord: { ok: false } }, 3, true), false);
-  assert.equal(shouldSuggestSwitch({ google: { ok: true }, discord: { ok: false } }, 1, true), false);
+  assert.equal(shouldSuggestSwitch({ cloudflare: { ok: true }, discord: { ok: false } }, 2, true), true);
+  assert.equal(shouldSuggestSwitch({ cloudflare: { ok: false }, discord: { ok: false } }, 3, true), false);
+  assert.equal(shouldSuggestSwitch({ cloudflare: { ok: true }, discord: { ok: false } }, 1, true), false);
+});
+
+test('Cloudflare DNS probes use bundled primary and backup resolver IPs', () => {
+  assert.deepEqual(CLOUDFLARE_DNS_SERVERS, ['1.1.1.1', '1.0.0.1']);
+  assert.deepEqual(TARGET_SERVICES.map(({ id }) => id), ['youtube', 'discord', 'cloudflare']);
+  assert.equal(TARGET_SERVICES[2].servers, CLOUDFLARE_DNS_SERVERS);
+  assert.match(TARGET_SERVICES[2].url, /^https:\/\/cloudflare-dns\.com\/dns-query\?/);
 });
 
 test('HTTP errors are not mistaken for successful connectivity', () => {
