@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { describeStrategy, buildStrategy, customStrategyFilename } = require('./strategy-editor');
 const { TARGET_SERVICES, summarizeStrategy, pickAlternative, shouldSuggestSwitch, isHttpHealthy } = require('./smart-routing');
+const { monotonicDownloadPercent } = require('./download-progress');
 
 const APP_NAME = 'Zapret Control Center';
 const UPDATE_REPO = 'Flowseal/zapret-discord-youtube';
@@ -319,6 +320,7 @@ function createWindow() {
     minHeight: 640,
     show: false,
     title: APP_NAME,
+    icon: path.join(__dirname, 'assets', 'app-icon.png'),
     backgroundColor: '#101318',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -408,15 +410,7 @@ function unloadWindow(force = false) {
 }
 
 function createTray() {
-  const icon = nativeImage.createFromDataURL(
-    'data:image/svg+xml;utf8,' +
-      encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-        <rect width="32" height="32" rx="7" fill="#141820"/>
-        <path d="M8 17.5c4-10 12-10 16 0" fill="none" stroke="#5eead4" stroke-width="3" stroke-linecap="round"/>
-        <path d="M9 22h14" stroke="#f59e0b" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="16" cy="16" r="3" fill="#f8fafc"/>
-      </svg>`)
-  );
+  const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'app-icon.png')).resize({ width: 32, height: 32 });
 
   tray = new Tray(icon);
   tray.setToolTip(APP_NAME);
@@ -1810,7 +1804,13 @@ async function checkForZapretUpdate(options = {}) {
   log(lastUpdate.message);
 
   if (hasUpdate && options.apply) {
-    await applyZapretUpdate(latestVersion);
+    try {
+      await applyZapretUpdate(latestVersion);
+    } catch (error) {
+      lastUpdate = { ...lastUpdate, status: 'error', message: `Ошибка обновления: ${error.message}` };
+      send('update:progress', lastUpdate);
+      throw error;
+    }
   }
 
   await sendState();
@@ -1861,7 +1861,8 @@ async function downloadAppUpdate(version) {
   sendAppUpdateProgress();
 
   await downloadFile(url, target, 0, (loaded, total) => {
-    const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((loaded / total) * 100))) : 0;
+    const percent = monotonicDownloadPercent(lastAppUpdate.progress, loaded, total);
+    if (percent === lastAppUpdate.progress) return;
     lastAppUpdate = {
       ...lastAppUpdate,
       status: 'downloading',
@@ -1939,13 +1940,6 @@ async function checkForAppUpdate() {
       progress: 0
     };
     sendAppUpdateProgress();
-    pushNotification({
-      type: 'info',
-      title: 'Доступно обновление',
-      message: `Версия ${latestVersion} скачивается автоматически.`,
-      persistent: true,
-      action: 'app-update'
-    });
     log(`Доступно обновление приложения: ${latestVersion}`);
 
     await downloadAppUpdate(latestVersion);
@@ -1965,7 +1959,11 @@ async function checkForAppUpdate() {
 
 function sendAppUpdateProgress() {
   send('app-update:progress', lastAppUpdate);
-  sendState().catch(() => {});
+  // IPC already carries the progress. Rebuilding the entire UI state for every
+  // percentage can arrive out of order and make the notification flicker.
+  if (lastAppUpdate.status !== 'downloading' || lastAppUpdate.progress === 0) {
+    sendState().catch(() => {});
+  }
 }
 
 function pushNotification(payload) {
@@ -1976,7 +1974,8 @@ async function applyZapretUpdate(latestVersion) {
   lastUpdate = {
     ...lastUpdate,
     status: 'downloading',
-    message: 'Скачиваю релиз'
+    message: 'Скачиваю релиз 0%',
+    progress: 0
   };
   send('update:progress', lastUpdate);
 
@@ -1997,9 +1996,14 @@ async function applyZapretUpdate(latestVersion) {
   const extractDir = path.join(tempRoot, 'extract');
 
   try {
-    await downloadFile(asset.browser_download_url, zipPath);
+    await downloadFile(asset.browser_download_url, zipPath, 0, (loaded, total) => {
+      const percent = monotonicDownloadPercent(lastUpdate.progress, loaded, total);
+      if (percent === lastUpdate.progress) return;
+      lastUpdate = { ...lastUpdate, progress: percent, message: `Скачиваю релиз ${percent}%` };
+      send('update:progress', lastUpdate);
+    });
 
-    lastUpdate = { ...lastUpdate, status: 'installing', message: 'Распаковываю и применяю обновление' };
+    lastUpdate = { ...lastUpdate, status: 'installing', progress: 100, message: 'Распаковываю и применяю обновление' };
     send('update:progress', lastUpdate);
 
     await execFileAsync('powershell.exe', [
@@ -2031,7 +2035,8 @@ async function applyZapretUpdate(latestVersion) {
     status: 'updated',
     localVersion: readLocalVersion(),
     latestVersion,
-    message: `zapret обновлён до ${latestVersion}`
+    message: `zapret обновлён до ${latestVersion}`,
+    progress: 100
   };
   send('update:progress', lastUpdate);
   log(lastUpdate.message);

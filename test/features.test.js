@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { describeStrategy, buildStrategy, customStrategyFilename } = require('../src/strategy-editor');
 const { CLOUDFLARE_DNS_SERVERS, TARGET_SERVICES, summarizeStrategy, pickAlternative, shouldSuggestSwitch, isHttpHealthy } = require('../src/smart-routing');
+const { clampPercent, monotonicDownloadPercent } = require('../src/download-progress');
 
 const sample = fs.readFileSync(path.join(__dirname, '../zapret/general.bat'), 'utf8');
 const binFiles = ['tls_clienthello_www_google_com.bin', 'stun.bin'];
@@ -74,4 +75,15 @@ test('Cloudflare DNS probes use bundled primary and backup resolver IPs', () => 
 test('HTTP errors are not mistaken for successful connectivity', () => {
   for (const code of ['200', '204', '301', '302']) assert.equal(isHttpHealthy(code), true);
   for (const code of ['000', '403', '404', '503', 'ERR']) assert.equal(isHttpHealthy(code), false);
+});
+
+test('download percentages never jump backwards or exceed 100%', () => {
+  assert.equal(monotonicDownloadPercent(32, 20, 100), 32);
+  assert.equal(monotonicDownloadPercent(32, 51, 100), 51);
+  assert.equal(monotonicDownloadPercent(32, 30, 0), 32);
+  assert.equal(monotonicDownloadPercent(98, 99.8, 100), 99);
+  assert.equal(monotonicDownloadPercent(99, 110, 100), 100);
+  assert.equal(clampPercent(-5), 0);
+  assert.equal(clampPercent(Number.NaN), 0);
+  assert.equal(clampPercent(1000), 100);
 });

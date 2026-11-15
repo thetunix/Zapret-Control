@@ -76,4 +76,4 @@ jobs:
             --latest=false `
             --target "$env:GITHUB_SHA" `
             --title "Zapret Control Center $env:BETA_VERSION (Beta)" `
-            --notes "Beta update: restored YouTube and Discord status on the home screen, replaced Google control with Cloudflare DNS, and bundled the 1.1.1.1 and 1.0.0.1 Cloudflare resolver endpoints. Stable 0.2.8 remains available."
+            --notes "Beta update: visible numeric download percentages and smooth persistent progress bars for app and zapret downloads, plus a custom cloud app icon throughout Windows, the tray and installer. Stable 0.2.8 remains available."

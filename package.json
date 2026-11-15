@@ -1,6 +1,6 @@
 {
   "name": "zapret-control-center",
-  "version": "0.3.0-beta.5",
+  "version": "0.3.0-beta.6",
   "private": true,
   "author": "Zapret Team",
   "description": "Electron control center for Flowseal zapret-discord-youtube.",
@@ -32,9 +32,12 @@
       "package.json"
     ],
     "win": {
-      "target": ["nsis"]
+      "target": ["nsis"],
+      "icon": "build/icon.ico"
     },
     "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },

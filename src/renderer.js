@@ -31,8 +31,10 @@ const defaultCustomTheme = {
 const LOG_LIMIT = 200;
 const LOG_ROWS_VISIBLE = 120;
 const TOAST_LIMIT = 4;
+const dismissedDownloadToasts = new Set();
 
 let state = null;
+let dismissedAppBannerKey = null;
 let logs = [];
 let testRunning = false;
 let renderQueued = false;
@@ -134,9 +136,10 @@ function bindPowerSaving() {
 }
 
 window.zapret.onUpdateProgress((update) => {
-  if (!state) return;
+  if (!state) state = {};
   state.update = update;
   renderUpdate();
+  renderDownloadToast('zapret', update);
 });
 
 window.zapret.onAppUpdateProgress((appUpdate) => {
@@ -144,6 +147,7 @@ window.zapret.onAppUpdateProgress((appUpdate) => {
   state.appUpdate = appUpdate;
   renderAppUpdateBanner();
   renderAppUpdateSettings();
+  renderDownloadToast('app', appUpdate);
 });
 
 window.zapret.onNotification((payload) => {
@@ -439,6 +443,8 @@ function renderState() {
   renderUpdate();
   renderAppUpdateBanner();
   renderAppUpdateSettings();
+  renderDownloadToast('app', state.appUpdate);
+  renderDownloadToast('zapret', state.update);
   renderMonitor();
   renderDiagnostics();
   refreshEditorChoices();
@@ -587,12 +593,27 @@ function renderAppUpdateBanner() {
 
   const appUpdate = state?.appUpdate;
   const active = appUpdate && ['available', 'downloading', 'downloaded'].includes(appUpdate.status);
-  container.innerHTML = '';
+  if (!active) {
+    container.replaceChildren();
+    return;
+  }
 
-  if (!active) return;
+  const key = `${appUpdate.version || ''}:${appUpdate.status}`;
+  if (dismissedAppBannerKey && dismissedAppBannerKey !== key) dismissedAppBannerKey = null;
+  if (dismissedAppBannerKey === key) return;
+
+  // Keep the same progress element in the DOM: recreating it for each IPC event
+  // would restart the CSS transition and make the bar visibly jump.
+  const existing = container.querySelector('.app-banner');
+  if (existing?.dataset.updateKey === key) {
+    updateAppBannerProgress(existing, appUpdate);
+    return;
+  }
+  container.replaceChildren();
 
   const banner = document.createElement('div');
   banner.className = `app-banner app-banner-${appUpdate.status}`;
+  banner.dataset.updateKey = key;
 
   const text = document.createElement('div');
   text.className = 'app-banner-text';
@@ -613,10 +634,13 @@ function renderAppUpdateBanner() {
     }));
     actions.appendChild(installBtn);
   } else if (appUpdate.status === 'downloading') {
+    const percent = document.createElement('b');
+    percent.className = 'app-banner-percent';
+    percent.textContent = '0%';
     const progress = document.createElement('div');
     progress.className = 'app-banner-progress';
-    progress.innerHTML = `<span style="width:${Math.round(appUpdate.progress || 0)}%"></span>`;
-    actions.appendChild(progress);
+    progress.appendChild(document.createElement('span'));
+    actions.append(percent, progress);
   }
 
   const dismissBtn = document.createElement('button');
@@ -624,6 +648,7 @@ function renderAppUpdateBanner() {
   dismissBtn.textContent = '×';
   dismissBtn.setAttribute('aria-label', 'Скрыть');
   dismissBtn.addEventListener('click', () => {
+    dismissedAppBannerKey = key;
     banner.classList.add('hidden');
     setTimeout(() => banner.remove(), 220);
   });
@@ -632,6 +657,67 @@ function renderAppUpdateBanner() {
   banner.appendChild(actions);
   banner.appendChild(dismissBtn);
   container.appendChild(banner);
+  updateAppBannerProgress(banner, appUpdate);
+}
+
+function updateAppBannerProgress(banner, appUpdate) {
+  const progressBar = banner.querySelector('.app-banner-progress span');
+  if (!progressBar) return;
+  const incoming = Math.max(0, Math.min(100, Math.floor(Number(appUpdate.progress) || 0)));
+  const percent = Math.max(Number(banner.dataset.progress) || 0, incoming);
+  banner.dataset.progress = String(percent);
+  progressBar.style.width = `${percent}%`;
+  const percentLabel = banner.querySelector('.app-banner-percent');
+  if (percentLabel) percentLabel.textContent = `${percent}%`;
+  const message = banner.querySelector('.app-banner-text span');
+  if (message) message.textContent = `Скачиваю обновление ${percent}%`;
+}
+
+function renderDownloadToast(kind, update) {
+  const stack = $('#toastStack');
+  if (!stack) return;
+  const active = update?.status === 'downloading' || (kind === 'zapret' && update?.status === 'installing');
+  let toast = stack.querySelector(`[data-download-kind="${kind}"]`);
+  if (!active) {
+    dismissedDownloadToasts.delete(kind);
+    if (toast) dismissToast(toast);
+    return;
+  }
+  if (dismissedDownloadToasts.has(kind)) return;
+
+  if (!toast) {
+    while (stack.childElementCount >= TOAST_LIMIT) {
+      const old = Array.from(stack.children).find((el) => !el.classList.contains('toast-download')) || stack.firstElementChild;
+      old.remove();
+    }
+    toast = document.createElement('div');
+    toast.className = 'toast toast-info toast-download';
+    toast.dataset.downloadKind = kind;
+    toast.innerHTML = '<strong></strong><p></p><div class="toast-download-meta"><span></span><b class="toast-download-percent">0%</b></div><div class="toast-download-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div>';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'toast-close';
+    closeBtn.textContent = '×';
+    closeBtn.setAttribute('aria-label', 'Скрыть уведомление о загрузке');
+    closeBtn.addEventListener('click', () => {
+      dismissedDownloadToasts.add(kind);
+      dismissToast(toast);
+    });
+    toast.appendChild(closeBtn);
+    stack.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('visible'));
+  }
+
+  const incoming = Math.max(0, Math.min(100, Math.floor(Number(update.progress) || 0)));
+  const percent = Math.max(Number(toast.dataset.progress) || 0, incoming);
+  toast.dataset.progress = String(percent);
+  toast.querySelector('strong').textContent = kind === 'app' ? 'Обновление приложения' : 'Обновление zapret';
+  toast.querySelector('p').textContent = update.status === 'installing'
+    ? 'Загрузка завершена, применяю обновление…'
+    : `Скачивание — ${percent}%`;
+  toast.querySelector('.toast-download-meta span').textContent = update.status === 'installing' ? 'Установка' : 'Загрузка';
+  toast.querySelector('.toast-download-percent').textContent = `${percent}%`;
+  toast.querySelector('.toast-download-track span').style.width = `${percent}%`;
+  toast.querySelector('.toast-download-track').setAttribute('aria-valuenow', String(percent));
 }
 
 function showToast(type, message, options = {}) {
@@ -643,7 +729,8 @@ function showToast(type, message, options = {}) {
     stack.querySelectorAll(`[data-action="${options.action}"]`).forEach((node) => node.remove());
   }
   while (stack.childElementCount >= TOAST_LIMIT) {
-    stack.removeChild(stack.firstElementChild);
+    const oldest = Array.from(stack.children).find((node) => !node.classList.contains('toast-download')) || stack.firstElementChild;
+    stack.removeChild(oldest);
   }
 
   const toast = document.createElement('div');
