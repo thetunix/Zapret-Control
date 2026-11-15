@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - .github/workflows/beta-release.yml
+      - package.json
   workflow_dispatch:
 
 permissions:
@@ -75,4 +76,4 @@ jobs:
             --latest=false `
             --target "$env:GITHUB_SHA" `
             --title "Zapret Control Center $env:BETA_VERSION (Beta)" `
-            --notes "Experimental Windows build with smart strategy selection, service monitoring, diagnostics and a visual BAT editor. Back up your configuration before testing. Stable version 0.2.8 remains available."
+            --notes "Beta update: compact YouTube, Discord and Google status icons with latency below each icon. Includes smart strategy selection, service monitoring, diagnostics and the visual BAT editor. Stable 0.2.8 remains available."

@@ -928,10 +928,20 @@ function renderMonitor() {
     for (const [id, label] of [['youtube', 'YouTube'], ['discord', 'Discord'], ['google', 'Google · контроль']]) {
       const result = monitor.services?.[id];
       const card = makeElement('div', `service-card ${result ? result.ok ? 'service-ok' : 'service-fail' : 'service-unknown'}`);
-      const title = makeElement('strong', '', label);
-      const status = makeElement('span', '', !result ? 'Не проверялся' : result.ok ? 'Доступен' : 'Недоступен');
-      const detail = makeElement('small', '', result ? `${result.code || 'ERR'} · ${result.ms ?? '—'} мс` : '—');
-      card.append(title, status, detail);
+      const availability = !result ? 'Не проверялся' : result.ok ? 'Доступен' : 'Недоступен';
+      const latency = result?.ok && Number.isFinite(result.ms) ? `${Math.round(result.ms)} мс` : '— мс';
+      const code = result?.code ? `, HTTP ${result.code}` : '';
+      card.title = `${label}: ${availability}, задержка HTTPS: ${latency}${code}`;
+      card.setAttribute('role', 'status');
+      card.setAttribute('aria-label', card.title);
+
+      const symbol = makeElement('span', 'service-symbol');
+      symbol.append(
+        makeElement('span', `service-logo service-logo-${id}`),
+        makeElement('span', 'service-indicator')
+      );
+      const ping = makeElement('span', 'service-ping', latency);
+      card.append(symbol, ping);
       container.appendChild(card);
     }
   }
