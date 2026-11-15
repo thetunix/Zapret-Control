@@ -39,6 +39,10 @@ let renderQueued = false;
 let logsRenderQueued = false;
 let metricsTimer = null;
 let logSeq = 0;
+let editorModel = null;
+let editorLoadId = 0;
+let editorPreviewId = 0;
+let editorPreviewTimer = null;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -49,6 +53,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindPowerSaving();
   initThemes();
   await refreshState(true);
+  await initStrategyEditor();
   await refreshGeneralList();
   await refreshLogs();
 });
@@ -185,6 +190,18 @@ window.zapret.onTestsError((error) => {
   $('#testDetail').textContent = error.message;
 });
 
+window.zapret.onMonitor((monitor) => {
+  if (!state) return;
+  state.monitor = monitor;
+  renderMonitor();
+});
+
+window.zapret.onDiagnostics((rows) => {
+  if (!state) return;
+  state.diagnostics = rows;
+  renderDiagnostics();
+});
+
 function bindTabs() {
   $$('.nav-item').forEach((button) => {
     button.addEventListener('click', () => {
@@ -193,6 +210,7 @@ function bindTabs() {
       button.classList.add('active');
       $(`#tab-${button.dataset.tab}`).classList.add('active');
       if (button.dataset.tab === 'logs') refreshLogs();
+      if (button.dataset.tab === 'monitor' && !state?.monitor?.checkedAt) refreshMonitor();
       if (button.dataset.tab === 'settings') startMetricsTimer();
       else stopMetricsTimer();
     });
@@ -292,6 +310,28 @@ function bindControls() {
     await action(() => window.zapret.startTests({ mode: $('#testModeSelect').value, applyBest: true }));
   });
   $('#cancelTestsBtn').addEventListener('click', () => window.zapret.cancelTests());
+
+  $('#monitorEnabledToggle').addEventListener('change', async (event) => patchSetting({ monitorEnabled: event.target.checked }));
+  $('#smartSwitchToggle').addEventListener('change', async (event) => {
+    await patchSetting({ smartSwitchEnabled: event.target.checked });
+    if (event.target.checked) showToast('info', 'Автоматический выбор использует результаты тестов. При изменении службы могут понадобиться права администратора.', { title: 'Автопереключение' });
+  });
+  $('#checkMonitorBtn').addEventListener('click', refreshMonitor);
+  $('#runDiagnosticsBtn').addEventListener('click', refreshDiagnostics);
+  $('#editorBaseConfig').addEventListener('change', loadStrategyEditor);
+  $('#editorName').addEventListener('input', scheduleEditorPreview);
+  $('#editorPreviewBtn').addEventListener('click', refreshEditorPreview);
+  $('#editorSaveBtn').addEventListener('click', async () => {
+    if (!editorModel) return;
+    try {
+      const result = await window.zapret.saveStrategy(editorPayload());
+      showToast('success', `Создан ${result.filename}. Выберите его на главной и запустите.`, { title: 'Стратегия сохранена', duration: 8000 });
+      await refreshState();
+      refreshEditorChoices();
+    } catch (error) {
+      showToast('error', error.message || String(error), { title: 'Не удалось создать стратегию', duration: 9000 });
+    }
+  });
 
   $('#reloadListBtn').addEventListener('click', refreshGeneralList);
   $('#domainForm').addEventListener('submit', async (event) => {
@@ -399,6 +439,9 @@ function renderState() {
   renderUpdate();
   renderAppUpdateBanner();
   renderAppUpdateSettings();
+  renderMonitor();
+  renderDiagnostics();
+  refreshEditorChoices();
   updateThemeSelection();
 }
 
@@ -845,6 +888,224 @@ async function action(fn, options = {}) {
     }
   } catch (error) {
     showToast('error', error.message || String(error), { title: 'Ошибка', duration: 9000 });
+  }
+}
+
+function makeElement(tag, className = '', label = '') {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (label) node.textContent = label;
+  return node;
+}
+
+async function refreshMonitor() {
+  const button = $('#checkMonitorBtn');
+  button.disabled = true;
+  try {
+    const monitor = await window.zapret.checkMonitor();
+    if (state) state.monitor = monitor;
+    renderMonitor();
+  } catch (error) {
+    showToast('error', error.message || String(error), { title: 'Мониторинг' });
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderMonitor() {
+  if (!state) return;
+  const monitor = state.monitor || { services: {} };
+  setChecked('#monitorEnabledToggle', state.settings.monitorEnabled);
+  setChecked('#smartSwitchToggle', state.settings.smartSwitchEnabled);
+  const when = monitor.checkedAt
+    ? `Обновлено ${new Date(monitor.checkedAt).toLocaleTimeString('ru-RU')}` : 'Проверок пока нет';
+  $('#homeMonitorTime').textContent = when;
+  $('#monitorMessage').textContent = monitor.checking ? 'Проверяю сайты…' : monitor.message || when;
+  $('#checkMonitorBtn').disabled = Boolean(monitor.checking);
+
+  for (const container of [$('#homeServiceCards'), $('#monitorServiceCards')]) {
+    container.textContent = '';
+    for (const [id, label] of [['youtube', 'YouTube'], ['discord', 'Discord'], ['google', 'Google · контроль']]) {
+      const result = monitor.services?.[id];
+      const card = makeElement('div', `service-card ${result ? result.ok ? 'service-ok' : 'service-fail' : 'service-unknown'}`);
+      const title = makeElement('strong', '', label);
+      const status = makeElement('span', '', !result ? 'Не проверялся' : result.ok ? 'Доступен' : 'Недоступен');
+      const detail = makeElement('small', '', result ? `${result.code || 'ERR'} · ${result.ms ?? '—'} мс` : '—');
+      card.append(title, status, detail);
+      container.appendChild(card);
+    }
+  }
+
+  const ranking = $('#strategyRanking');
+  ranking.textContent = '';
+  const history = (state.strategyHistory || []).slice().sort((a, b) => b.total - a.total).slice(0, 12);
+  if (!history.length) {
+    ranking.appendChild(makeElement('p', 'micro-note', 'Ещё нет результатов. Запустите подбор на вкладке «Тесты».'));
+  }
+  for (const [index, entry] of history.entries()) {
+    const row = makeElement('div', 'ranking-row');
+    const name = makeElement('strong', '', `${index + 1}. ${entry.config}`);
+    const signals = ['youtube', 'discord'].map((id) => `${id}: ${entry.services?.[id] === true ? '✓' : entry.services?.[id] === false ? '✕' : '?'}`).join(' · ');
+    row.append(name, makeElement('span', '', signals), makeElement('b', '', `${entry.total} б.`));
+    ranking.appendChild(row);
+  }
+}
+
+async function refreshDiagnostics() {
+  const button = $('#runDiagnosticsBtn');
+  button.disabled = true;
+  try {
+    state.diagnostics = await window.zapret.runDiagnostics();
+    renderDiagnostics();
+  } catch (error) {
+    showToast('error', error.message || String(error), { title: 'Диагностика' });
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderDiagnostics() {
+  const container = $('#diagnosticsResults');
+  if (!state || !state.diagnostics?.length) return;
+  container.textContent = '';
+  for (const entry of state.diagnostics) {
+    const card = makeElement('section', `panel diagnostic-card diagnostic-${entry.level}`);
+    const summary = makeElement('div', 'diagnostic-summary');
+    const marker = entry.level === 'ok' ? '✓' : entry.level === 'error' ? '!' : entry.level === 'warning' ? '⚠' : 'i';
+    summary.append(makeElement('span', 'diagnostic-marker', marker), makeElement('strong', '', entry.title));
+    card.append(summary, makeElement('p', 'micro-note', entry.detail));
+    if (entry.fixId) {
+      const button = makeElement('button', 'ghost-button', entry.fixLabel || 'Исправить');
+      button.addEventListener('click', async () => {
+        if (!window.confirm(`Выполнить действие «${entry.fixLabel || 'Исправить'}»?`)) return;
+        button.disabled = true;
+        try {
+          state.diagnostics = await window.zapret.fixDiagnostic(entry.fixId);
+          await refreshState();
+          showToast('success', 'Исправление выполнено', { title: 'Диагностика' });
+        } catch (error) {
+          button.disabled = false;
+          showToast('error', error.message || String(error), { title: 'Исправление не удалось', duration: 9000 });
+        }
+      });
+      card.appendChild(button);
+    }
+    container.appendChild(card);
+  }
+}
+
+function refreshEditorChoices() {
+  const select = $('#editorBaseConfig');
+  const choices = state?.configs || [];
+  const signature = choices.map((item) => item.name).join('|');
+  if (select.dataset.signature === signature) return;
+  const previous = select.value;
+  select.textContent = '';
+  for (const entry of choices) {
+    const option = makeElement('option', '', entry.label);
+    option.value = entry.name;
+    select.appendChild(option);
+  }
+  if (choices.some((item) => item.name === previous)) select.value = previous;
+  else if (choices.some((item) => item.name === state.settings.selectedConfig)) select.value = state.settings.selectedConfig;
+  select.dataset.signature = signature;
+}
+
+async function initStrategyEditor() {
+  if (!$('#editorName').value) $('#editorName').value = 'Моя стратегия';
+  refreshEditorChoices();
+  await loadStrategyEditor();
+}
+
+async function loadStrategyEditor() {
+  const config = $('#editorBaseConfig').value;
+  const requestId = ++editorLoadId;
+  editorModel = null;
+  $('#editorRules').textContent = '';
+  if (!config) return;
+  try {
+    const next = await window.zapret.readStrategy(config);
+    if (requestId !== editorLoadId) return;
+    editorModel = next;
+    renderEditorRules();
+    scheduleEditorPreview();
+  } catch (error) {
+    $('#editorNotice').textContent = error.message || String(error);
+  }
+}
+
+function editorPayload() {
+  if (!editorModel) throw new Error('Сначала выберите конфиг');
+  return {
+    baseConfig: editorModel.config,
+    name: $('#editorName').value,
+    rules: editorModel.rules.map(({ index, ports, desync, repeats, fakeTls }) => ({ index, ports, desync, repeats, fakeTls }))
+  };
+}
+
+function editorField(label, value, onInput, options = null, type = 'text') {
+  const field = makeElement('label', 'editor-field');
+  field.appendChild(makeElement('span', '', label));
+  const input = makeElement(options ? 'select' : 'input');
+  if (options) {
+    for (const optionValue of options) {
+      const option = makeElement('option', '', optionValue || 'Без TLS fake');
+      option.value = optionValue;
+      input.appendChild(option);
+    }
+  } else {
+    input.type = type;
+    if (type === 'number') {
+      input.min = '1';
+      input.max = '20';
+    }
+  }
+  input.value = value ?? '';
+  input.addEventListener(options ? 'change' : 'input', () => onInput(input.value));
+  field.appendChild(input);
+  return field;
+}
+
+function renderEditorRules() {
+  const container = $('#editorRules');
+  container.textContent = '';
+  if (!editorModel) return;
+  for (const rule of editorModel.rules) {
+    const card = makeElement('section', 'panel editor-rule');
+    const heading = makeElement('div', 'button-row');
+    heading.append(makeElement('h2', '', `Правило ${rule.index + 1}`), makeElement('span', 'protocol-pill', rule.protocol));
+    const controls = makeElement('div', 'editor-rule-grid');
+    const update = (field) => (value) => { rule[field] = value; scheduleEditorPreview(); };
+    controls.appendChild(editorField('Порты', rule.ports, update('ports')));
+    controls.appendChild(editorField('DPI desync', rule.desync, update('desync')));
+    controls.appendChild(editorField('Повторы', rule.repeats, update('repeats'), null, 'number'));
+    if (rule.protocol === 'TCP') {
+      const options = ['', ...editorModel.fakeFiles];
+      if (rule.fakeTls && !options.includes(rule.fakeTls)) options.push(rule.fakeTls);
+      controls.appendChild(editorField('TLS fake (bin)', rule.fakeTls, update('fakeTls'), options));
+    }
+    card.append(heading, controls);
+    container.appendChild(card);
+  }
+}
+
+function scheduleEditorPreview() {
+  if (editorPreviewTimer) clearTimeout(editorPreviewTimer);
+  editorPreviewTimer = setTimeout(refreshEditorPreview, 320);
+}
+
+async function refreshEditorPreview() {
+  if (!editorModel) return;
+  const requestId = ++editorPreviewId;
+  try {
+    const result = await window.zapret.previewStrategy(editorPayload());
+    if (requestId !== editorPreviewId) return;
+    $('#editorNotice').textContent = `Будет создан: ${result.filename}`;
+    $('#editorPreview').textContent = result.preview;
+  } catch (error) {
+    if (requestId !== editorPreviewId) return;
+    $('#editorNotice').textContent = `Ошибка: ${error.message || String(error)}`;
+    $('#editorPreview').textContent = '';
   }
 }
 

@@ -1,9 +1,12 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, shell, globalShortcut, powerMonitor } = require('electron');
 const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
+const dns = require('node:dns').promises;
 const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
+const { describeStrategy, buildStrategy, customStrategyFilename } = require('./strategy-editor');
+const { TARGET_SERVICES, summarizeStrategy, pickAlternative, shouldSuggestSwitch, isHttpHealthy } = require('./smart-routing');
 
 const APP_NAME = 'Zapret Control Center';
 const UPDATE_REPO = 'Flowseal/zapret-discord-youtube';
@@ -27,6 +30,8 @@ const POLL_INTERVAL_VISIBLE_MS = 15000;
 const POLL_INTERVAL_TRAY_MS = 60000;
 const POLL_INTERVAL_ECO_TRAY_MS = 180000;
 const POLL_INTERVAL_TEST_MS = 2000;
+const MONITOR_INTERVAL_MS = 120000;
+const SMART_SWITCH_COOLDOWN_MS = 20 * 60 * 1000;
 const THEMES = [
   'figma', 'aurora', 'graphite', 'ember', 'glacier', 'orchid', 'forest', 'ruby', 'noir',
   'midnight', 'sunset', 'matrix', 'cyber', 'sakura', 'mocha', 'nord', 'dracula', 'gold', 'ocean',
@@ -59,6 +64,20 @@ let intentionalStop = false;
 let watchdogAttempts = [];
 let watchdogTimer = null;
 let lastActiveConfig = null;
+let monitorTimer = null;
+let monitorInFlight = null;
+let autoSwitching = false;
+let switchAttemptAt = 0;
+let failedCheckStreak = 0;
+let lastDiagnostics = [];
+let strategyHistory = [];
+let monitorState = {
+  checking: false,
+  checkedAt: null,
+  services: {},
+  message: 'Проверки ещё не запускались',
+  switching: false
+};
 let hotkeyRegistered = false;
 let lastUpdate = {
   status: 'idle',
@@ -109,7 +128,10 @@ const defaultSettings = {
   ecoMode: true,
   disableGpu: false,
   watchdog: true,
-  toggleHotkey: true
+  toggleHotkey: true,
+  monitorEnabled: true,
+  smartSwitchEnabled: false,
+  strategyHistory: []
 };
 
 applyEarlySettings();
@@ -137,6 +159,7 @@ app.on('window-all-closed', () => {});
 app.on('before-quit', () => {
   isQuitting = true;
   stopStatusPolling();
+  stopMonitor();
   cancelWindowUnload();
   if (watchdogTimer) {
     clearTimeout(watchdogTimer);
@@ -164,6 +187,7 @@ async function bootstrap() {
   settingsFile = path.join(app.getPath('userData'), 'settings.json');
   logFile = path.join(app.getPath('userData'), 'zapret-control.log');
   settings = loadSettings();
+  strategyHistory = Array.isArray(settings.strategyHistory) ? settings.strategyHistory.slice(0, 60) : [];
 
   if (await shouldRelaunchElevated()) {
     log('Перезапуск с правами администратора');
@@ -197,6 +221,7 @@ async function bootstrap() {
   }
 
   scheduleStatusPoll(true);
+  scheduleMonitor(15000);
   log(`Приложение запущено. Корень zapret: ${rootDir}`);
 
   const runningAtLaunch = await getWinwsStatus();
@@ -660,12 +685,15 @@ function registerIpc() {
 
   ipcMain.handle('settings:set', async (_event, patch) => {
     const safe = sanitizeSettingsPatch(patch);
+    if (safe.smartSwitchEnabled === true) safe.monitorEnabled = true;
+    if (safe.monitorEnabled === false) safe.smartSwitchEnabled = false;
     settings = { ...settings, ...safe };
     if (patch?.gameFilterMode) setGameFilterMode(settings.gameFilterMode);
     saveSettings();
     syncLoginItem();
     if ('toggleHotkey' in safe) registerToggleHotkey();
     if ('ecoMode' in safe) scheduleStatusPoll(true);
+    if ('monitorEnabled' in safe || 'smartSwitchEnabled' in safe) scheduleMonitor(2000);
     if ('unloadWindowInTray' in safe && !safe.unloadWindowInTray) cancelWindowUnload();
     trayMenuSignature = null;
     updateTray();
@@ -719,6 +747,23 @@ function registerIpc() {
     if (activeTest) activeTest.cancelled = true;
     return true;
   });
+
+  ipcMain.handle('monitor:check', async () => {
+    await runMonitor({ force: true });
+    return monitorState;
+  });
+  ipcMain.handle('diagnostics:run', async () => {
+    await runDiagnostics();
+    return lastDiagnostics;
+  });
+  ipcMain.handle('diagnostics:fix', async (_event, fixId) => {
+    await applyDiagnosticFix(fixId);
+    await runDiagnostics();
+    return lastDiagnostics;
+  });
+  ipcMain.handle('strategy:read', (_event, configName) => readStrategyForEditor(configName));
+  ipcMain.handle('strategy:preview', (_event, payload) => previewStrategy(payload));
+  ipcMain.handle('strategy:save', async (_event, payload) => saveCustomStrategy(payload));
 
   ipcMain.handle('service:install', async (_event, configName) => {
     await installZapretService(configName || settings.bestConfig || settings.selectedConfig);
@@ -780,6 +825,8 @@ function sanitizeSettingsPatch(patch) {
   if (typeof patch.disableGpu === 'boolean') safe.disableGpu = patch.disableGpu;
   if (typeof patch.watchdog === 'boolean') safe.watchdog = patch.watchdog;
   if (typeof patch.toggleHotkey === 'boolean') safe.toggleHotkey = patch.toggleHotkey;
+  if (typeof patch.monitorEnabled === 'boolean') safe.monitorEnabled = patch.monitorEnabled;
+  if (typeof patch.smartSwitchEnabled === 'boolean') safe.smartSwitchEnabled = patch.smartSwitchEnabled;
   if (typeof patch.testMode === 'string') safe.testMode = patch.testMode;
   if (['disabled', 'all', 'tcp', 'udp'].includes(patch.gameFilterMode)) safe.gameFilterMode = patch.gameFilterMode;
   if (Number.isFinite(Number(patch.ambientIntensity))) safe.ambientIntensity = clampNumber(patch.ambientIntensity, 0, 100);
@@ -969,6 +1016,9 @@ async function buildStateInner() {
     },
     update: lastUpdate,
     appUpdate: lastAppUpdate,
+    monitor: monitorState,
+    diagnostics: lastDiagnostics,
+    strategyHistory,
     hotkey: { combo: TOGGLE_HOTKEY.replace('Control', 'Ctrl'), active: hotkeyRegistered },
     logs: recentLogs.slice(-160)
   };
@@ -1108,6 +1158,52 @@ function readConfigsFromDisk() {
   }
 }
 
+function readStrategyForEditor(configName) {
+  const found = getConfigs().find((item) => item.name === configName);
+  if (!found) throw new Error('Выберите стратегию из списка');
+  const source = fs.readFileSync(found.path, 'utf8');
+  const fakeFiles = fs.readdirSync(binDir).filter((name) => /^[\w.-]+\.bin$/i.test(name)).sort();
+  return { config: found.name, rules: describeStrategy(source), fakeFiles };
+}
+
+function previewStrategy(payload) {
+  if (!payload || !payload.baseConfig) throw new Error('Не выбрана исходная стратегия');
+  const editor = readStrategyForEditor(payload.baseConfig);
+  const raw = fs.readFileSync(path.join(rootDir, editor.config), 'utf8');
+  const filename = customStrategyFilename(payload.name);
+  const preview = buildStrategy(raw, payload.rules, editor.fakeFiles);
+  return { filename, preview };
+}
+
+async function saveCustomStrategy(payload) {
+  if (activeTest || autoSwitching) throw new Error('Дождитесь окончания теста или переключения');
+  const { filename, preview } = previewStrategy(payload);
+  const file = path.join(rootDir, filename);
+  try {
+    fs.writeFileSync(file, preview, { encoding: 'utf8', flag: 'wx' });
+  } catch (error) {
+    if (error.code === 'EACCES' || error.code === 'EPERM') {
+      throw new Error('Нет прав записи в папку Zapret. Запустите Control Center от администратора или установите в доступную папку.');
+    }
+    if (error.code === 'EEXIST') throw new Error(`Файл ${filename} уже существует. Выберите другое название.`);
+    throw error;
+  }
+  try {
+    // Verify that our real command-line parser can run the generated file.
+    parseConfig(filename);
+  } catch (error) {
+    fs.rmSync(file, { force: true });
+    throw error;
+  }
+  configsCache = null;
+  settings.selectedConfig = filename;
+  saveSettings();
+  trayMenuSignature = null;
+  log(`Создана пользовательская стратегия: ${filename}`);
+  await sendState();
+  return { filename };
+}
+
 function getConfigKind(name) {
   const upper = name.toUpperCase();
   if (upper.includes('FAKE TLS AUTO')) return 'Fake TLS Auto';
@@ -1146,6 +1242,95 @@ function setGameFilterMode(mode) {
     fs.writeFileSync(flag, `${mode}\r\n`, 'utf8');
   }
   log(`Игровой фильтр: ${mode}`);
+}
+
+async function runDiagnostics() {
+  const rows = [];
+  const add = (id, level, title, detail, fixId = null, fixLabel = null) => {
+    rows.push({ id, level, title, detail, fixId, fixLabel });
+  };
+  const required = [
+    ['winws.exe', winwsExe],
+    ['WinDivert.dll', path.join(binDir, 'WinDivert.dll')],
+    ['WinDivert64.sys', path.join(binDir, 'WinDivert64.sys')],
+    ['service.bat', path.join(rootDir, 'service.bat')]
+  ];
+  for (const [name, file] of required) {
+    add(`file-${name}`, fs.existsSync(file) ? 'ok' : 'error', name,
+      fs.existsSync(file) ? 'Файл найден' : 'Файл отсутствует. Восстановите пакет Zapret через обновление.');
+  }
+  const requiredLists = ['list-general.txt', 'list-general-user.txt', 'list-exclude.txt', 'ipset-all.txt'];
+  const missingLists = requiredLists.filter((name) => !fs.existsSync(path.join(listsDir, name)));
+  add('lists', missingLists.length ? 'error' : 'ok', 'Списки доменов/IP',
+    missingLists.length ? `Нет файлов: ${missingLists.join(', ')}` : 'Основные списки на месте',
+    missingLists.length ? 'restore-lists' : null, missingLists.length ? 'Восстановить' : null);
+
+  try {
+    parseConfig(settings.selectedConfig);
+    add('strategy', 'ok', 'Выбранная стратегия', `${settings.selectedConfig}: синтаксис запуска распознан`);
+  } catch (error) {
+    const hasDefault = getConfigs().some((item) => item.name === 'general.bat');
+    add('strategy', 'error', 'Выбранная стратегия', error.message,
+      hasDefault ? 'reset-strategy' : null, hasDefault ? 'Выбрать general.bat' : null);
+  }
+
+  const [service, running, admin] = await Promise.all([getServiceStatus(), getWinwsStatus(), isAdministrator()]);
+  add('process', running.active ? 'ok' : 'warning', 'Процесс Zapret',
+    running.active ? `Запущено процессов winws.exe: ${running.processes.length}` : 'Zapret не запущен',
+    !running.active ? 'restart-zapret' : null, !running.active ? 'Запустить' : null);
+  add('service', service.installed ? (service.state === 'RUNNING' ? 'ok' : 'warning') : 'info',
+    'Служба Windows', service.installed ? `Установлена, состояние: ${service.state}` : 'Не установлена (не обязательна)',
+    !service.installed ? 'install-service' : null, !service.installed ? 'Установить' : null);
+  add('admin', 'info', 'Права администратора', admin ? 'Есть' : 'Нет — некоторые исправления потребуют подтверждения UAC');
+
+  try {
+    const resolved = await Promise.race([
+      dns.lookup('www.google.com', { family: 4 }),
+      delay(5000).then(() => { throw new Error('Тайм-аут DNS'); })
+    ]);
+    add('dns', 'ok', 'DNS', `www.google.com → ${resolved.address}`);
+  } catch (error) {
+    add('dns', 'warning', 'DNS', `Не удалось разрешить имя: ${error.message}. Проверьте настройки DNS.`);
+  }
+  const httpsCheck = await runCurlCheck('https://www.google.com/', 'HTTPS', ['--http1.1']);
+  add('internet', httpsCheck.ok ? 'ok' : 'warning', 'HTTPS-соединение',
+    httpsCheck.ok ? `Google отвечает: HTTP ${httpsCheck.code}, ${httpsCheck.ms} мс`
+      : `Проверка не прошла (${httpsCheck.code}). Проверьте сеть, DNS и фильтры.`);
+  if (settings.gameFilterMode !== 'disabled') {
+    add('game', 'info', 'Игровой фильтр', `Сейчас включён режим ${settings.gameFilterMode}. Он может мешать отдельным играм.`,
+      'disable-game-filter', 'Выключить фильтр');
+  }
+  lastDiagnostics = rows;
+  send('diagnostics:update', rows);
+  return rows;
+}
+
+async function applyDiagnosticFix(fixId) {
+  switch (fixId) {
+    case 'restore-lists':
+      ensureRequiredLists();
+      break;
+    case 'reset-strategy':
+      if (!getConfigs().some((item) => item.name === 'general.bat')) throw new Error('general.bat не найден');
+      settings.selectedConfig = 'general.bat';
+      saveSettings();
+      break;
+    case 'restart-zapret':
+      await startZapret(settings.selectedConfig, { remember: true, reason: 'diagnostic-fix' });
+      break;
+    case 'install-service':
+      await installZapretService(settings.selectedConfig);
+      break;
+    case 'disable-game-filter':
+      settings.gameFilterMode = 'disabled';
+      setGameFilterMode('disabled');
+      saveSettings();
+      break;
+    default:
+      throw new Error('Неизвестное исправление');
+  }
+  log(`Диагностика: выполнено исправление ${fixId}`);
+  await sendState();
 }
 
 function getGameFilterValues() {
@@ -2024,6 +2209,8 @@ async function runConfigTests(options) {
   const previousConfig = settings.selectedConfig;
   const wasRunning = (await getWinwsStatus()).active;
   const results = [];
+  let completed = false;
+  let appliedBest = false;
 
   log(`Старт тестов: ${configs.length} конфигов, режим ${mode}`);
   send('tests:start', { total: configs.length, mode, targets: targets.length });
@@ -2040,31 +2227,43 @@ async function runConfigTests(options) {
       });
       const score = scoreTargets(targetResults);
       results.push({ config: config.name, score, targetResults });
+      if (!activeTest.cancelled) {
+        const summary = summarizeStrategy({ config: config.name, score, targetResults });
+        strategyHistory = [summary, ...strategyHistory.filter((item) => item.config !== config.name)].slice(0, 60);
+        settings.strategyHistory = strategyHistory;
+        saveSettings();
+      }
       send('tests:result', { config: config.name, score, targetResults });
       await stopZapretProcesses({ stopService: false, quiet: true });
     }
 
     const best = results.slice().sort((a, b) => b.score.total - a.score.total || b.score.ok - a.score.ok || a.score.fail - b.score.fail)[0];
-    if (best) {
+    if (best?.score.ok > 0 && !activeTest.cancelled) {
       settings.bestConfig = best.config;
-      settings.selectedConfig = best.config;
+      if (applyBest) settings.selectedConfig = best.config;
       saveSettings();
       log(`Лучший конфиг: ${best.config} (${best.score.total} баллов)`);
       send('tests:done', { best, results, cancelled: activeTest.cancelled });
       if (applyBest && !activeTest.cancelled) {
-        await startZapret(best.config, { remember: true, reason: 'best-test', useService: false });
+        // Restore the Windows service as well; leaving it stopped would break autostart.
+        await startZapret(best.config, { remember: true, reason: 'best-test' });
+        appliedBest = true;
       }
     } else {
       send('tests:done', { best: null, results, cancelled: activeTest.cancelled });
+      if (!activeTest.cancelled) log('Ни один конфиг не прошёл HTTPS-тесты', 'warn');
     }
+    completed = true;
   } finally {
     const cancelled = activeTest?.cancelled;
     activeTest = null;
     scheduleStatusPoll(true);
-    if (cancelled) {
-      log('Тесты остановлены пользователем', 'warn');
-      if (wasRunning) await startZapret(previousConfig, { remember: false, reason: 'restore', useService: false });
+    if (cancelled || !completed || !appliedBest) {
+      if (cancelled) log('Тесты остановлены пользователем', 'warn');
+      if (wasRunning) await startZapret(previousConfig, { remember: false, reason: 'restore' });
+      else await stopZapretProcesses({ stopService: false, quiet: true });
     }
+    scheduleMonitor(2000);
     await sendState();
   }
 }
@@ -2133,14 +2332,14 @@ async function testTargets(targets, onTarget) {
 
 async function runCurlCheck(url, label, protocolArgs) {
   try {
-    const args = ['-I', '-s', '-m', '5', '-o', 'NUL', '-w', '%{http_code}', '--show-error', ...protocolArgs, url];
-    const { stdout } = await execFileAsync('curl.exe', args, { timeout: 7000 });
-    const code = stdout.trim();
-    return { label, ok: /^\d{3}$/.test(code), code };
+    const args = ['-I', '-L', '-sS', '--connect-timeout', '4', '-m', '6', '-o', process.platform === 'win32' ? 'NUL' : '/dev/null', '-w', '%{http_code} %{time_total}', ...protocolArgs, url];
+    const { stdout } = await execFileAsync('curl.exe', args, { timeout: 8000 });
+    const [code, seconds] = stdout.trim().split(/\s+/);
+    return { label, ok: isHttpHealthy(code), code, ms: Number.isFinite(+seconds) ? Math.round(+seconds * 1000) : null };
   } catch (error) {
     const text = `${error.stdout || ''} ${error.stderr || ''} ${error.message}`;
     const unsupported = /not supported|unsupported|unknown option|unrecognized option|schannel/i.test(text);
-    return { label, ok: false, unsupported, code: unsupported ? 'UNSUP' : 'ERR' };
+    return { label, ok: false, unsupported, code: unsupported ? 'UNSUP' : 'ERR', ms: null };
   }
 }
 
@@ -2179,6 +2378,120 @@ function scoreTargets(targetResults) {
     pingOk,
     total: ok * 3 + pingOk - fail
   };
+}
+
+function stopMonitor() {
+  if (monitorTimer) clearTimeout(monitorTimer);
+  monitorTimer = null;
+}
+
+function scheduleMonitor(delay = MONITOR_INTERVAL_MS) {
+  stopMonitor();
+  if (isQuitting || !settings?.monitorEnabled) return;
+  monitorTimer = setTimeout(() => {
+    monitorTimer = null;
+    runMonitor().catch((error) => log(`Мониторинг: ${error.message}`, 'warn'));
+  }, delay);
+  monitorTimer.unref?.();
+}
+
+async function probeServices() {
+  const results = await Promise.all(TARGET_SERVICES.map(async (target) => {
+    const check = await runCurlCheck(target.url, 'HTTPS', ['--http1.1']);
+    return [target.id, { name: target.name, ok: check.ok, code: check.code, ms: check.ms }];
+  }));
+  return Object.fromEntries(results);
+}
+
+async function runMonitor({ force = false } = {}) {
+  if (monitorInFlight) return monitorInFlight;
+  if (isQuitting || activeTest || autoSwitching || startZapretInFlight) return monitorState;
+  if (!settings.monitorEnabled && !force) return monitorState;
+
+  monitorState = { ...monitorState, checking: true };
+  send('monitor:update', monitorState);
+  monitorInFlight = (async () => {
+    const services = await probeServices();
+    const failed = ['youtube', 'discord'].filter((id) => services[id]?.ok === false);
+    failedCheckStreak = services.google?.ok && failed.length ? failedCheckStreak + 1 : 0;
+    monitorState = {
+      ...monitorState,
+      checking: false,
+      checkedAt: Date.now(),
+      services,
+      message: !services.google?.ok ? 'Контрольный сайт недоступен: проверьте интернет'
+        : failed.length ? `Недоступно: ${failed.join(', ')}` : 'Проверенные сайты отвечают'
+    };
+    send('monitor:update', monitorState);
+    if (shouldSuggestSwitch(services, failedCheckStreak, settings.smartSwitchEnabled && settings.monitorEnabled)) {
+      await attemptSmartSwitch(failed);
+    }
+    await sendState({ refresh: false });
+    return monitorState;
+  })().finally(() => {
+    monitorInFlight = null;
+    scheduleMonitor();
+  });
+  return monitorInFlight;
+}
+
+async function attemptSmartSwitch(failed) {
+  if (activeTest || autoSwitching || startZapretInFlight || Date.now() - switchAttemptAt < SMART_SWITCH_COOLDOWN_MS) return;
+  const running = await getWinwsStatus();
+  if (!running.active) return;
+  const service = await getServiceStatus();
+  if ((!service.installed && running.managedCount === 0) || running.processes.length > 1) {
+    monitorState.message = 'Найден сторонний или дополнительный winws.exe. Автопереключение остановлено для безопасности.';
+    send('monitor:update', monitorState);
+    return;
+  }
+
+  const history = strategyHistory.filter((entry) => Date.now() - entry.checkedAt < 14 * 24 * 3600000);
+  const candidate = pickAlternative(history, getConfigs().map((config) => config.name), settings.selectedConfig, failed);
+  if (!candidate) {
+    monitorState.message = 'Нет проверенной альтернативы. Откройте «Тесты» и запустите подбор.';
+    send('monitor:update', monitorState);
+    return;
+  }
+
+  if (service.installed && (!service.configName || !await isAdministrator())) {
+    monitorState.message = `Подходит ${candidate.config}, но службу нельзя безопасно изменить в фоне. Выберите конфиг вручную.`;
+    send('monitor:update', monitorState);
+    return;
+  }
+
+  const previous = service.installed ? service.configName : settings.selectedConfig;
+  switchAttemptAt = Date.now();
+  autoSwitching = true;
+  monitorState.switching = true;
+  monitorState.message = `Пробую ${candidate.config}…`;
+  send('monitor:update', monitorState);
+  try {
+    await startZapret(candidate.config, { remember: true, reason: 'smart-switch' });
+    await delay(4000);
+    const nextServices = await probeServices();
+    const improved = nextServices.google?.ok && failed.some((id) => nextServices[id]?.ok);
+    if (!improved) throw new Error('Доступность сервисов не улучшилась');
+    monitorState.services = nextServices;
+    monitorState.checkedAt = Date.now();
+    monitorState.message = `Автопереключение: ${candidate.config} помогло`;
+    failedCheckStreak = 0;
+    log(monitorState.message);
+    pushNotification({ type: 'success', title: 'Умная стратегия', message: monitorState.message });
+  } catch (error) {
+    log(`Автопереключение: ${error.message}; возвращаю ${previous}`, 'warn');
+    monitorState.message = `Новая стратегия не помогла. Возвращаю ${previous}`;
+    try {
+      await startZapret(previous, { remember: true, reason: 'smart-rollback' });
+    } catch (restoreError) {
+      monitorState.message = `Не удалось вернуть ${previous}: ${restoreError.message}`;
+      log(monitorState.message, 'error');
+    }
+  } finally {
+    autoSwitching = false;
+    monitorState.switching = false;
+    send('monitor:update', monitorState);
+  }
 }
 
 function execFileAsync(command, args, options = {}) {

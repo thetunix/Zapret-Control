@@ -56,6 +56,18 @@
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5Zm10 0v4h4M8 11h8M8 15h8M8 19h5" /></svg>
             <span>Тесты</span>
           </button>
+          <button class="nav-item" data-tab="monitor">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg>
+            <span>Мониторинг</span>
+          </button>
+          <button class="nav-item" data-tab="diagnostics">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 7v5c0 5 3 8 8 9 5-1 8-4 8-9V7Zm-4 9 3 3 5-6" /></svg>
+            <span>Диагностика</span>
+          </button>
+          <button class="nav-item" data-tab="editor">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4Zm4 4h8M8 12h8M8 16h5" /></svg>
+            <span>Конструктор</span>
+          </button>
           <button class="nav-item" data-tab="lists">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" /></svg>
             <span>Списки</span>
@@ -167,6 +179,13 @@
                 <div class="log-preview" id="homeLogs"></div>
               </section>
             </section>
+            <section class="panel quick-monitor">
+              <div class="button-row monitor-heading">
+                <h2>Доступность сервисов</h2>
+                <span class="micro-note" id="homeMonitorTime">Ожидание проверки</span>
+              </div>
+              <div class="service-grid" id="homeServiceCards"></div>
+            </section>
           </div>
         </section>
 
@@ -197,6 +216,60 @@
           </section>
 
           <section class="results-grid" id="testResults"></section>
+        </section>
+
+        <section class="tab-panel" id="tab-monitor">
+          <div class="toolbar">
+            <div><h1>Мониторинг</h1><p>Доступность сервисов и умная смена стратегии</p></div>
+            <div class="toolbar-actions"><button class="primary-button" id="checkMonitorBtn">Проверить сейчас</button></div>
+          </div>
+          <section class="panel">
+            <div class="switch-row">
+              <div><strong>Фоновый мониторинг</strong><p class="micro-note">Проверка HTTPS каждые 2 минуты</p></div>
+              <label class="switch"><input type="checkbox" id="monitorEnabledToggle" /><span></span></label>
+            </div>
+            <div class="switch-row">
+              <div><strong>Умное автопереключение</strong><p class="micro-note">После двух сбоев пробует только проверенные стратегии; при неудаче откатывает</p></div>
+              <label class="switch"><input type="checkbox" id="smartSwitchToggle" /><span></span></label>
+            </div>
+            <div class="notice" id="monitorMessage">Ожидание проверки…</div>
+            <p class="micro-note">Проверяется HTTPS-ответ сайтов. Работа видео, CDN и голосовых каналов отдельно не гарантируется.</p>
+            <div class="service-grid" id="monitorServiceCards"></div>
+          </section>
+          <section class="panel top-gap">
+            <h2>Результаты подбора</h2>
+            <p class="micro-note">Альтернативы берутся из тестов на вкладке «Тесты». При смене службы Windows могут понадобиться права администратора.</p>
+            <div id="strategyRanking" class="ranking-list"></div>
+          </section>
+        </section>
+
+        <section class="tab-panel" id="tab-diagnostics">
+          <div class="toolbar">
+            <div><h1>Диагностика</h1><p>Проверка файлов, службы, DNS и соединения</p></div>
+            <div class="toolbar-actions"><button class="primary-button" id="runDiagnosticsBtn">Проверить систему</button></div>
+          </div>
+          <div class="notice">Исправления выполняются только после подтверждения. Системные DNS и сетевые настройки не сбрасываются.</div>
+          <div id="diagnosticsResults" class="diagnostics-list top-gap">
+            <section class="panel"><p>Запустите диагностику, чтобы увидеть результат.</p></section>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-editor">
+          <div class="toolbar"><div><h1>Конструктор</h1><p>Создание своей стратегии без редактирования BAT вручную</p></div></div>
+          <section class="panel">
+            <div class="editor-toolbar">
+              <label>Основа<select id="editorBaseConfig"></select></label>
+              <label>Название<input id="editorName" maxlength="32" placeholder="Моя стратегия" /></label>
+            </div>
+            <div class="notice">Исходный BAT не изменяется. Редактируются правила TCP/UDP, DPI desync, повторы и TLS fake; остальные параметры сохраняются. Для записи в защищённую папку установки могут потребоваться права администратора.</div>
+          </section>
+          <div id="editorRules" class="editor-rules top-gap"></div>
+          <section class="panel top-gap">
+            <div class="button-row"><h2>Предпросмотр BAT</h2><button class="ghost-button" id="editorPreviewBtn">Обновить</button></div>
+            <div class="micro-note" id="editorNotice">Выберите исходный конфиг.</div>
+            <pre class="editor-preview" id="editorPreview"></pre>
+            <div class="button-row"><button class="primary-button" id="editorSaveBtn">Создать стратегию</button></div>
+          </section>
         </section>
 
         <section class="tab-panel" id="tab-lists">

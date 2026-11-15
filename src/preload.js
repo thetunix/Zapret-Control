@@ -38,6 +38,13 @@ contextBridge.exposeInMainWorld('zapret', {
   startTests: (options) => invoke('tests:start', options),
   cancelTests: () => invoke('tests:cancel'),
 
+  checkMonitor: () => invoke('monitor:check'),
+  runDiagnostics: () => invoke('diagnostics:run'),
+  fixDiagnostic: (fixId) => invoke('diagnostics:fix', fixId),
+  readStrategy: (configName) => invoke('strategy:read', configName),
+  previewStrategy: (payload) => invoke('strategy:preview', payload),
+  saveStrategy: (payload) => invoke('strategy:save', payload),
+
   installService: (configName) => invoke('service:install', configName),
   removeService: () => invoke('service:remove'),
 
@@ -52,5 +59,7 @@ contextBridge.exposeInMainWorld('zapret', {
   onTestsTarget: (callback) => listen('tests:target', callback),
   onTestsResult: (callback) => listen('tests:result', callback),
   onTestsDone: (callback) => listen('tests:done', callback),
-  onTestsError: (callback) => listen('tests:error', callback)
+  onTestsError: (callback) => listen('tests:error', callback),
+  onMonitor: (callback) => listen('monitor:update', callback),
+  onDiagnostics: (callback) => listen('diagnostics:update', callback)
 });
