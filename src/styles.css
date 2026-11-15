@@ -693,7 +693,7 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 /* =====================================================================
    Home dashboard — centered power control (flex flow, no overlap)
    ===================================================================== */
-.home-dashboard { position: relative; display: flex; flex-direction: column; gap: 16px; min-height: calc(100vh - 116px); }
+.home-dashboard { position: relative; display: flex; flex-direction: column; justify-content: flex-end; gap: 16px; min-height: calc(100vh - 116px); }
 
 .auto-panel { position: absolute; top: 0; right: 0; z-index: 3; width: 268px; padding: 16px; border-radius: var(--radius-md); }
 .auto-panel h2 { margin-bottom: 10px; }
@@ -705,7 +705,10 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 .auto-panel .ghost-button { min-height: 32px; padding: 0 12px; font-size: 12px; }
 .auto-panel .notice { margin-top: 10px; font-size: 11.5px; }
 
-.power-stage { position: relative; z-index: 2; flex: 1 1 auto; display: grid; place-items: center; width: 100%; min-height: 240px; padding: 8px 0; }
+.power-stage { position: absolute; top: 47%; left: 50%; z-index: 2; display: grid; place-items: center; width: 196px; height: 196px; transform: translate(-50%, -50%); }
+.home-service-mini { position: absolute; top: calc(100% + 39px); left: 50%; transform: translateX(-50%); }
+.home-service-mini .service-grid { justify-content: center; flex-wrap: nowrap; margin-top: 0; }
+.home-service-mini .service-card { background: var(--surface); border: 1px solid var(--line); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 
 .power-button { position: relative; display: grid; place-items: center; width: 196px; height: 196px; border: 0; border-radius: 50%; background: transparent; color: #fff; transition: transform 220ms var(--ease); }
 
@@ -741,7 +744,7 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 .power-button.online .power-icon { border-color: #fff; border-top-color: transparent; }
 .power-button.online .power-icon::before { background: #fff; }
 
-.home-bottom { position: relative; margin-top: auto; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.9fr); gap: 16px; align-items: end; }
+.home-bottom { position: relative; margin-top: auto; display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 300px); justify-content: space-between; gap: 16px; align-items: end; }
 
 .status-block {
   padding: 18px 20px;
@@ -769,9 +772,6 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 /* Monitoring, guided diagnostics and the strategy builder */
 .top-gap { margin-top: 16px; }
 .micro-note { font-size: 12px; line-height: 1.55; color: var(--muted); }
-.monitor-heading { justify-content: space-between; }
-.monitor-heading h2 { margin-bottom: 0; }
-.quick-monitor { padding: 14px 18px; }
 .service-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .service-card { display: flex; flex: 0 0 74px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 65px; padding: 9px 8px; border-radius: 10px; background: rgba(255,255,255,.035); }
 .service-symbol { position: relative; display: grid; place-items: center; width: 28px; height: 28px; }
@@ -779,7 +779,7 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 .service-logo-youtube { background: #ff0033; -webkit-mask-image: url('assets/icons/youtube.svg'); mask-image: url('assets/icons/youtube.svg'); }
 .service-logo-discord { background: #5865f2; -webkit-mask-image: url('assets/icons/discord.svg'); mask-image: url('assets/icons/discord.svg'); }
 .service-logo-google { background: #4285f4; -webkit-mask-image: url('assets/icons/google.svg'); mask-image: url('assets/icons/google.svg'); }
-.service-indicator { position: absolute; right: -3px; bottom: -2px; width: 8px; height: 8px; border: 1px solid var(--panel); border-radius: 50%; background: var(--muted); }
+.service-indicator { position: absolute; right: -3px; bottom: -2px; width: 8px; height: 8px; border: 1px solid var(--surface-2); border-radius: 50%; background: var(--muted); }
 .service-ok .service-indicator { background: var(--good); }
 .service-fail .service-indicator { background: var(--danger); }
 .service-ping { color: var(--muted); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -837,10 +837,13 @@ body.motion-idle .ambient-goo {
   .home-grid, .settings-grid { grid-template-columns: 1fr; }
   .home-bottom { grid-template-columns: 1fr; }
   .auto-panel { position: static; width: auto; margin-bottom: 0; }
+  .home-dashboard { min-height: auto; justify-content: start; }
+  .home-dashboard .power-stage { position: relative; top: auto; left: auto; width: 100%; height: 350px; margin: 0; transform: none; }
+  .home-service-mini { top: auto; bottom: 0; }
 }
 
 @media (max-height: 760px) {
-  .power-stage { min-height: 170px; }
+  .power-stage { width: 150px; height: 150px; }
   .power-button { width: 150px; height: 150px; }
   .logs-panel .log-preview { height: 120px; min-height: 0; }
 }

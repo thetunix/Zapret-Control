@@ -76,4 +76,4 @@ jobs:
             --latest=false `
             --target "$env:GITHUB_SHA" `
             --title "Zapret Control Center $env:BETA_VERSION (Beta)" `
-            --notes "Beta update: compact YouTube, Discord and Google status icons with latency below each icon. Includes smart strategy selection, service monitoring, diagnostics and the visual BAT editor. Stable 0.2.8 remains available."
+            --notes "Beta update: centered power button and a single compact Discord status on the home screen. Full YouTube, Discord, Google status remains on the Monitoring page. Stable 0.2.8 remains available."

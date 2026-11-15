@@ -919,13 +919,15 @@ function renderMonitor() {
   setChecked('#smartSwitchToggle', state.settings.smartSwitchEnabled);
   const when = monitor.checkedAt
     ? `Обновлено ${new Date(monitor.checkedAt).toLocaleTimeString('ru-RU')}` : 'Проверок пока нет';
-  $('#homeMonitorTime').textContent = when;
   $('#monitorMessage').textContent = monitor.checking ? 'Проверяю сайты…' : monitor.message || when;
   $('#checkMonitorBtn').disabled = Boolean(monitor.checking);
 
   for (const container of [$('#homeServiceCards'), $('#monitorServiceCards')]) {
     container.textContent = '';
-    for (const [id, label] of [['youtube', 'YouTube'], ['discord', 'Discord'], ['google', 'Google · контроль']]) {
+    const services = container.id === 'homeServiceCards'
+      ? [['discord', 'Discord']]
+      : [['youtube', 'YouTube'], ['discord', 'Discord'], ['google', 'Google · контроль']];
+    for (const [id, label] of services) {
       const result = monitor.services?.[id];
       const card = makeElement('div', `service-card ${result ? result.ok ? 'service-ok' : 'service-fail' : 'service-unknown'}`);
       const availability = !result ? 'Не проверялся' : result.ok ? 'Доступен' : 'Недоступен';
