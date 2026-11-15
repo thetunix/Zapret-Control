@@ -8,7 +8,7 @@
   "scripts": {
     "start": "electron .",
     "start:admin": "electron . --admin",
-    "test": "node --test test/*.test.js",
+    "test": "node --test",
     "build": "electron-builder"
   },
   "devDependencies": {
