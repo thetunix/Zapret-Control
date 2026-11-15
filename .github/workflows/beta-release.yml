@@ -1,0 +1,78 @@
+name: Build Windows beta installer
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/beta-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beta-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-beta:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Verify beta version
+        id: meta
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+-beta\.\d+$') {
+            throw "Expected a beta version in package.json, found: $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build Windows NSIS installer
+        run: npm run build -- --win nsis --publish never
+
+      - name: Verify installer and generate checksum
+        shell: pwsh
+        env:
+          BETA_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          $installer = "dist/Zapret-Control-Center-Setup-$env:BETA_VERSION.exe"
+          if (-not (Test-Path -LiteralPath $installer)) {
+            throw "Installer not found: $installer"
+          }
+          $checksum = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          $filename = Split-Path -Leaf $installer
+          "$checksum  $filename" | Set-Content -Path "dist/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Publish prerelease (does not replace stable latest)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BETA_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          $tag = "v$env:BETA_VERSION"
+          $installer = "dist/Zapret-Control-Center-Setup-$env:BETA_VERSION.exe"
+          gh release create $tag $installer "dist/SHA256SUMS.txt" `
+            --prerelease `
+            --latest=false `
+            --target "$env:GITHUB_SHA" `
+            --title "Zapret Control Center $env:BETA_VERSION (Beta)" `
+            --notes "Experimental Windows build with smart strategy selection, service monitoring, diagnostics and a visual BAT editor. Back up your configuration before testing. Stable version 0.2.8 remains available."
