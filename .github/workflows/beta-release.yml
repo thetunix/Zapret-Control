@@ -99,4 +99,4 @@ jobs:
             --latest=false `
             --target "$env:GITHUB_SHA" `
             --title "Zapret Control Center $env:BETA_VERSION (Beta)" `
-            --notes "Beta update: refined premium interface, smooth sliding protection states (Connected / Connecting / Disconnected), and one-click verified official Flowseal TG WS Proxy install and management. The installer now includes winws.exe from the checksum-verified Flowseal 1.10.4 release, fixing fresh-install startup. Stable 0.2.8 remains available."
+            --notes "Beta update: refined premium interface, responsive sliding protection states (Connected / Connecting / Disconnected), and one-click verified official Flowseal TG WS Proxy install and management. Fixed captions at narrow window widths. The installer includes winws.exe from the checksum-verified Flowseal 1.10.4 release, fixing fresh-install startup. Stable 0.2.8 remains available."

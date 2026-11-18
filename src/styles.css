@@ -960,6 +960,10 @@ body[data-connection="connecting"] .power-caption-status { color: var(--accent-2
 .tgws-note strong { color: var(--text); font-size: 13px; }
 @media (max-width: 1150px) { .tgws-layout { grid-template-columns: 1fr; } .tgws-hero { min-height: 390px; } .tgws-info { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 970px) { .tgws-info { grid-template-columns: 1fr; } }
+@media (max-width: 1080px) {
+  .home-dashboard .power-stage .power-eyebrow { top: 13px; }
+  .home-dashboard .power-stage .power-caption { top: calc(50% + 108px); }
+}
 @media (prefers-reduced-motion: reduce) {
   .sliding-text { transition: none; }
   .power-button.connecting .power-core, .power-button.connecting .halo-two, .pulse.pending { animation: none; }
