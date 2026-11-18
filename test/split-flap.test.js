@@ -16,6 +16,7 @@ function fakeElement(text = '') {
     dataset: {},
     children: [],
     className: '',
+    style: { setProperty() {} },
     classList: {
       add: (name) => classes.add(name),
       remove: (name) => classes.delete(name),
@@ -83,4 +84,55 @@ test('split-flap has two phased 3D folds and a reduced-motion fallback', () => {
   assert.match(styles, /\.split-flap-new-bottom\s*\{[^}]*animation: splitFlapUnfold 280ms/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
   assert.doesNotMatch(styles, /\.sliding-next\s*\{/);
+});
+
+test('decoder and smoke transitions settle into plain readable text', () => {
+  const document = { createElement: () => fakeElement() };
+  for (const effect of ['decoder', 'smoke']) {
+    const timers = [];
+    const flipText = new Function('document', 'window', 'flipTimers', 'setTimeout', 'clearTimeout',
+      `${renderer.slice(begin, end)}\nreturn flipText;`)(
+      document,
+      { matchMedia: () => ({ matches: false }) },
+      new WeakMap(),
+      (callback, delay) => { timers.push({ callback, delay }); return timers.length; },
+      () => {}
+    );
+    const label = fakeElement('Отключено');
+    label.dataset.displayedText = 'Отключено';
+    flipText(label, 'Подключено', effect);
+    assert.equal(label.classList.contains(`fx-${effect}-active`), true);
+    assert.equal(label.getAttribute('aria-label'), 'Подключено');
+    if (effect === 'decoder') {
+      assert.equal(label.children[0].className, 'fx-decoder-text');
+      assert.equal(timers.length, 17);
+    } else {
+      assert.equal(label.children[0].className, 'fx-smoke-word fx-smoke-out');
+      timers[0].callback();
+      assert.equal(label.children[0].className, 'fx-smoke-word fx-smoke-in');
+    }
+    timers[timers.length - 1].callback();
+    assert.equal(label.textContent, 'Подключено');
+    assert.equal(label.classList.contains(`fx-${effect}-active`), false);
+    assert.equal(label.getAttribute('aria-label'), undefined);
+  }
+});
+
+test('status effects use theme colors and never repeat the immediate previous type', () => {
+  const choices = ['split-flap', 'decoder', 'smoke'];
+  const start = renderer.indexOf('function randomStatusEffect(');
+  const stop = renderer.indexOf('\nconst $ =', start);
+  assert.ok(start >= 0 && stop > start);
+  const randomStatusEffect = new Function('STATUS_EFFECTS',
+    `${renderer.slice(start, stop)}\nreturn randomStatusEffect;`)(choices);
+  for (const old of choices) {
+    for (let i = 0; i < 30; i++) {
+      const next = randomStatusEffect(old);
+      assert.ok(choices.includes(next));
+      assert.notEqual(next, old);
+    }
+  }
+  assert.match(styles, /\.fx-decoder-text[^}]*var\(--accent-2\)/);
+  assert.match(styles, /@keyframes statusSmokeOut/);
+  assert.match(styles, /@keyframes statusSmokeIn/);
 });

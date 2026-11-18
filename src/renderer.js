@@ -47,6 +47,16 @@ let editorPreviewId = 0;
 let editorPreviewTimer = null;
 let pendingZapretOperation = null;
 const flipTimers = new WeakMap();
+const STATUS_EFFECTS = ['split-flap', 'decoder', 'smoke'];
+let connectionVisualText = null;
+let connectionEffect = 'split-flap';
+let tgwsVisualText = null;
+let tgwsEffect = 'split-flap';
+
+function randomStatusEffect(previous) {
+  const candidates = STATUS_EFFECTS.filter((effect) => effect !== previous);
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -465,8 +475,8 @@ function renderState() {
   updateThemeSelection();
 }
 
-/** Mechanical split-flap: fold the old top half, then unfold the new bottom half. */
-function flipText(target, nextText) {
+/** One-shot status animations. All effects use the currently selected theme. */
+function flipText(target, nextText, effect = 'split-flap') {
   if (!target || target.dataset.displayedText === nextText) return;
   if (!target.dataset.displayedText && target.textContent === nextText) {
     target.dataset.displayedText = nextText;
@@ -474,15 +484,73 @@ function flipText(target, nextText) {
   }
   const previous = target.dataset.displayedText ?? target.textContent;
   target.dataset.displayedText = nextText;
-  const activeTimers = flipTimers.get(target);
-  if (activeTimers) {
-    clearTimeout(activeTimers.midpoint);
-    clearTimeout(activeTimers.finish);
-  }
+  const activeTimers = flipTimers.get(target) || [];
+  activeTimers.forEach(clearTimeout);
+  flipTimers.delete(target);
+  const effectClasses = ['split-flap-active', 'fx-decoder-active', 'fx-smoke-active'];
+  effectClasses.forEach((className) => target.classList.remove(className));
   if (!previous || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    target.classList.remove('split-flap-active');
     target.removeAttribute('aria-label');
     target.textContent = nextText;
+    return;
+  }
+
+  const timers = [];
+  flipTimers.set(target, timers);
+  const after = (delay, callback) => {
+    const id = setTimeout(() => {
+      if (target.dataset.displayedText === nextText) callback();
+    }, delay);
+    timers.push(id);
+  };
+  const finish = () => {
+    effectClasses.forEach((className) => target.classList.remove(className));
+    target.removeAttribute('aria-label');
+    target.textContent = nextText;
+    flipTimers.delete(target);
+  };
+  target.setAttribute('aria-label', nextText);
+
+  if (effect === 'decoder') {
+    target.classList.add('fx-decoder-active');
+    const copy = document.createElement('span');
+    copy.className = 'fx-decoder-text';
+    copy.setAttribute('aria-hidden', 'true');
+    target.replaceChildren(copy);
+    const letters = Array.from(nextText);
+    const alphabet = Array.from('▓▒░#%&@*/?01∆⌁X');
+    const frames = 16;
+    const renderFrame = (frame) => {
+      const reveal = Math.floor(Math.max(0, frame - 3) / (frames - 3) * letters.length);
+      copy.textContent = letters.map((letter, index) => {
+        if (index < reveal || /\s/u.test(letter)) return letter;
+        return alphabet[Math.floor(Math.random() * alphabet.length)];
+      }).join('');
+    };
+    renderFrame(0);
+    for (let frame = 1; frame <= frames; frame++) after(frame * 36, () => renderFrame(frame));
+    after(620, finish);
+    return;
+  }
+
+  if (effect === 'smoke') {
+    const smokeWord = (text, direction) => {
+      const wrapper = document.createElement('span');
+      wrapper.className = `fx-smoke-word fx-smoke-${direction}`;
+      wrapper.setAttribute('aria-hidden', 'true');
+      Array.from(text).forEach((character, index) => {
+        const letter = document.createElement('span');
+        letter.className = 'fx-smoke-letter';
+        letter.style.setProperty('--i', String(Math.min(index, 12)));
+        letter.textContent = character === ' ' ? '\u00a0' : character;
+        wrapper.append(letter);
+      });
+      return wrapper;
+    };
+    target.classList.add('fx-smoke-active');
+    target.replaceChildren(smokeWord(previous, 'out'));
+    after(340, () => target.replaceChildren(smokeWord(nextText, 'in')));
+    after(820, finish);
     return;
   }
 
@@ -498,27 +566,19 @@ function flipText(target, nextText) {
   };
 
   target.classList.add('split-flap-active');
-  target.setAttribute('aria-label', nextText);
   target.replaceChildren(
     half(previous, 'old', 'top'),
     half(previous, 'old', 'bottom')
   );
   // Only one word is painted at a time. Keeping both words behind translucent
   // flaps caused duplicate glyphs to overlap during the transition.
-  const midpoint = setTimeout(() => {
-    if (target.dataset.displayedText !== nextText) return;
+  after(280, () => {
     target.replaceChildren(
       half(nextText, 'new', 'top'),
       half(nextText, 'new', 'bottom')
     );
-  }, 280);
-  const finish = setTimeout(() => {
-    if (target.dataset.displayedText !== nextText) return;
-    target.classList.remove('split-flap-active');
-    target.removeAttribute('aria-label');
-    target.textContent = nextText;
-  }, 590);
-  flipTimers.set(target, { midpoint, finish });
+  });
+  after(590, finish);
 }
 
 function renderConnectionState() {
@@ -529,9 +589,13 @@ function renderConnectionState() {
     : pendingZapretOperation === 'stop' ? 'Отключение…'
     : online ? 'Подключено' : 'Отключено';
 
-  flipText($('#statusText'), status);
-  flipText($('#powerStateLabel'), status);
-  flipText($('#miniStatus'), status);
+  if (status !== connectionVisualText) {
+    connectionEffect = randomStatusEffect(connectionEffect);
+    connectionVisualText = status;
+  }
+  flipText($('#statusText'), status, connectionEffect);
+  flipText($('#powerStateLabel'), status, connectionEffect);
+  flipText($('#miniStatus'), status, connectionEffect);
   $('#powerStateHint').textContent = pendingZapretOperation === 'start'
     ? 'Применяем выбранную стратегию'
     : pendingZapretOperation === 'stop' ? 'Завершаем соединение'
@@ -585,7 +649,11 @@ function renderTgws() {
   if (!tgws) return;
   const label = tgws.busy ? (tgws.progress > 0 ? 'Загрузка…' : 'Подготовка…')
     : tgws.running ? 'Запущен' : tgws.installed ? 'Отключён' : 'Не установлен';
-  flipText($('#tgwsStateLabel'), label);
+  if (label !== tgwsVisualText) {
+    tgwsEffect = randomStatusEffect(tgwsEffect);
+    tgwsVisualText = label;
+  }
+  flipText($('#tgwsStateLabel'), label, tgwsEffect);
   $('#tgwsDescription').textContent = tgws.message || (tgws.running
     ? 'Прокси работает. Подключи Telegram через меню TGWS в трее.'
     : tgws.installed ? 'Готов к запуску. Telegram настраивается отдельно.'
