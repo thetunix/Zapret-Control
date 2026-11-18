@@ -706,8 +706,8 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 /* =====================================================================
    Home dashboard — the power control and caption occupy normal flow.
    ===================================================================== */
-.home-dashboard { position: relative; display: flex; flex-direction: column; gap: 12px; min-height: calc(100vh - 152px); }
-.power-zone { display: flex; flex: 1 1 215px; min-height: 215px; align-items: center; justify-content: center; flex-direction: column; gap: 14px; padding: 18px 94px 4px; }
+.home-dashboard { position: relative; display: grid; grid-template-rows: minmax(210px, 1fr) auto; gap: 12px; min-height: calc(100vh - 152px); }
+.power-zone { display: flex; min-height: 210px; align-items: center; justify-content: flex-start; flex-direction: column; padding: 50px 94px 0; }
 .power-stage { position: relative; z-index: 2; display: grid; place-items: center; width: 156px; height: 156px; flex: 0 0 156px; }
 .home-quick-actions { position: absolute; z-index: 3; top: 20px; right: 0; display: grid; gap: 11px; }
 .home-quick-action { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 84px; min-height: 74px; padding: 10px 6px; border: 1px solid var(--line); border-radius: 15px; color: var(--soft); background: color-mix(in srgb, var(--surface) 72%, transparent); transition: background 180ms var(--ease), border-color 180ms var(--ease), transform 180ms var(--ease); }
@@ -715,8 +715,10 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 .home-quick-action:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 3px; }
 .home-quick-action svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; color: var(--accent-2); }
 .home-quick-action span { font-size: 10.5px; font-weight: 600; }
+.home-center-stack { position: relative; display: flex; flex-direction: column; align-items: center; align-self: end; justify-content: flex-end; gap: 40px; min-width: 0; margin-bottom: 50px; }
 .home-service-mini { position: relative; z-index: 1; align-self: center; margin: 0 auto; }
 .home-service-mini .service-grid { justify-content: center; flex-wrap: nowrap; margin-top: 0; }
+.home-service-mini .service-card { flex-basis: 72px; }
 .home-service-mini .service-card { background: var(--surface); border: 1px solid var(--line); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 
 .power-button { position: relative; display: grid; place-items: center; width: 156px; height: 156px; border: 0; border-radius: 50%; background: transparent; color: #fff; transition: transform 220ms var(--ease); }
@@ -753,7 +755,7 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 .power-button.online .power-icon { border-color: #fff; border-top-color: transparent; }
 .power-button.online .power-icon::before { background: #fff; }
 
-.home-bottom { position: relative; display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 300px); justify-content: space-between; gap: 16px; align-items: end; }
+.home-bottom { position: relative; display: grid; grid-template-columns: minmax(220px, 300px) minmax(220px, 1fr) minmax(220px, 300px); justify-content: space-between; gap: 16px; align-items: end; }
 
 .status-block {
   padding: 14px 16px;
@@ -844,11 +846,17 @@ body.motion-idle .ambient-goo {
 @media (max-width: 1080px) {
   .shell { grid-template-columns: 208px minmax(0, 1fr); }
   .home-grid, .settings-grid { grid-template-columns: 1fr; }
-  .home-bottom { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-bottom { grid-template-columns: minmax(0, 1fr) minmax(210px, .85fr) minmax(0, 1fr); }
+}
+@media (max-width: 940px) {
+  .home-bottom { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: 'status logs' 'middle middle'; }
+  .home-bottom > .status-block { grid-area: status; }
+  .home-bottom > .logs-panel { grid-area: logs; }
+  .home-center-stack { grid-area: middle; gap: 15px; margin: 12px 0 0; }
 }
 
 @media (max-height: 760px) {
-  .power-zone { min-height: 190px; flex-basis: 190px; gap: 10px; padding-top: 10px; }
+  .power-zone { min-height: 190px; padding-top: 50px; }
   .power-stage { width: 138px; height: 138px; flex-basis: 138px; }
   .power-button { width: 138px; height: 138px; }
   .logs-panel .log-preview { height: 112px; min-height: 0; }

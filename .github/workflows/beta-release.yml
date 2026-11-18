@@ -99,4 +99,4 @@ jobs:
             --latest=false `
             --target "$env:GITHUB_SHA" `
             --title "Zapret Control Center $env:BETA_VERSION (Beta)" `
-            --notes "Beta update: TG WS Proxy can open Telegram Desktop directly with its real local MTProto configuration, or copy the proxy link. Periodic background checks safely update Flowseal TGWS only when stopped; an available update can be installed and a managed proxy restarted on demand. Windows binary SHA-256 is verified and older binaries are backed up during replacement. Zapret Control Center continues to check and download its own updates automatically. Includes premium UI and themed status animations."
+            --notes "Beta UI correction: the power button now occupies the upper center as in the user's layout reference; protection status and service indicators sit together in the lower middle column between the configuration and quick logs. Removes the overly tight status caption under the power button, with responsive narrow-window fallback. Retains TG WS Proxy Telegram connection, verified updates, and the previous themed status animations."

@@ -21,6 +21,22 @@ test('power caption is outside the button stage and quick actions are separate',
   assert.match(css, /\.power-caption\s*\{\s*position: relative/);
 });
 
+test('home layout keeps the power control above a centered status and service row', () => {
+  const home = html.split('id="tab-home"')[1].split('id="tab-telegram"')[0];
+  const stage = home.indexOf('class="power-stage"');
+  const bottom = home.indexOf('class="home-bottom"');
+  const statusCard = home.indexOf('class="status-block"');
+  const middle = home.indexOf('class="home-center-stack"');
+  const caption = home.indexOf('class="power-caption"');
+  const serviceCards = home.indexOf('id="homeServiceCards"');
+  const logs = home.indexOf('class="panel logs-panel"');
+  assert.ok(stage >= 0 && bottom > stage && statusCard > bottom && middle > statusCard);
+  assert.ok(caption > middle && serviceCards > caption && logs > serviceCards);
+  assert.equal(home.split('id="powerStateLabel"').length - 1, 1);
+  assert.match(css, /\.home-dashboard\s*\{[^}]*grid-template-rows:/);
+  assert.match(css, /\.home-bottom\s*\{[^}]*grid-template-columns: minmax\(220px, 300px\) minmax\(220px, 1fr\) minmax\(220px, 300px\)/);
+});
+
 test('automation moved to settings, themes use a horizontal slider', () => {
   const settings = html.split('id="tab-settings"')[1];
   for (const id of ['launchAtLoginToggle', 'autoStartToggle', 'autoUpdateToggle', 'updateNotice']) {

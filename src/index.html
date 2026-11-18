@@ -134,11 +134,6 @@
                   </span>
                 </button>
               </section>
-              <div class="power-caption" role="status" aria-live="polite">
-                <span class="power-caption-caption">СОСТОЯНИЕ ЗАЩИТЫ</span>
-                <strong class="sliding-label power-caption-status" id="powerStateLabel">Отключено</strong>
-                <span class="power-caption-hint" id="powerStateHint">Нажми, чтобы подключиться</span>
-              </div>
             </div>
 
             <section class="home-bottom">
@@ -176,14 +171,22 @@
                 </div>
               </div>
 
+              <div class="home-center-stack">
+                <div class="power-caption" role="status" aria-live="polite">
+                  <span class="power-caption-caption">СОСТОЯНИЕ ЗАЩИТЫ</span>
+                  <strong class="sliding-label power-caption-status" id="powerStateLabel">Отключено</strong>
+                  <span class="power-caption-hint" id="powerStateHint">Нажми, чтобы подключиться</span>
+                </div>
+                <div class="home-service-mini" aria-label="Доступность YouTube, Discord и Cloudflare">
+                  <div class="service-grid" id="homeServiceCards"></div>
+                </div>
+              </div>
+
               <section class="panel logs-panel">
                 <h2>Быстрые логи</h2>
                 <div class="log-preview" id="homeLogs"></div>
               </section>
             </section>
-            <div class="home-service-mini" aria-label="Доступность YouTube, Discord и Cloudflare">
-              <div class="service-grid" id="homeServiceCards"></div>
-            </div>
           </div>
         </section>
 
