@@ -916,13 +916,23 @@ body[data-connection="connecting"] .power-caption-status { color: var(--accent-2
 @keyframes powerBreathing { 50% { transform: scale(.97); filter: brightness(1.18); } }
 @keyframes powerHalo { 0% { opacity: .9; transform: scale(.94); } 100% { opacity: .08; transform: scale(1.23); } }
 
-/* Curtain-style status change: outgoing copy moves UP, incoming slides from below. */
-.sliding-label { display: inline-block; position: relative; overflow: hidden; min-height: 1.5em; line-height: 1.5; vertical-align: middle; white-space: nowrap; }
-.sliding-text { display: block; position: absolute; inset: 0; overflow: hidden; white-space: nowrap; transition: transform 400ms cubic-bezier(.25, 1, .5, 1), opacity 380ms ease; }
-.sliding-old { transform: translateY(0); opacity: 1; }
-.sliding-old.sliding-out { transform: translateY(-105%); opacity: .2; }
-.sliding-next { transform: translateY(108%); opacity: .2; }
-.sliding-next.sliding-in { transform: translateY(0); opacity: 1; }
+/* Split-flap status: two hinged halves, not a vertical text slide. */
+.sliding-label { display: inline-block; position: relative; min-height: 1.5em; line-height: 1.5; vertical-align: middle; white-space: nowrap; }
+.sliding-label.split-flap-active { perspective: 600px; isolation: isolate; }
+.split-flap-half { position: absolute; left: 0; right: 0; height: 50%; overflow: hidden; backface-visibility: hidden; transform-style: preserve-3d; }
+.split-flap-top { top: 0; transform-origin: 50% 100%; }
+.split-flap-bottom { bottom: 0; transform-origin: 50% 0; }
+.split-flap-copy { position: absolute; left: 0; right: 0; height: 200%; display: flex; align-items: center; justify-content: flex-start; white-space: nowrap; }
+.split-flap-top .split-flap-copy { top: 0; }
+.split-flap-bottom .split-flap-copy { bottom: 0; }
+.power-caption-status .split-flap-copy { justify-content: center; }
+.split-flap-new-top, .split-flap-old-bottom { z-index: 1; }
+.split-flap-old-top { z-index: 3; animation: splitFlapFold 280ms cubic-bezier(.55, .06, .8, .4) both; }
+.split-flap-new-bottom { z-index: 4; animation: splitFlapUnfold 280ms 280ms cubic-bezier(.2, .7, .35, 1) both; }
+.split-flap-old-bottom { animation: splitFlapHideBottom 1ms 280ms step-end both; }
+@keyframes splitFlapFold { from { transform: rotateX(0deg); filter: brightness(1); } to { transform: rotateX(-90deg); filter: brightness(.55); } }
+@keyframes splitFlapUnfold { from { transform: rotateX(90deg); filter: brightness(.55); } to { transform: rotateX(0deg); filter: brightness(1); } }
+@keyframes splitFlapHideBottom { from { opacity: 1; } to { opacity: 0; } }
 .status-line .sliding-label { flex: 1; }
 
 /* TG WS Proxy — a dedicated desktop tool, with explicit install/launch states. */
@@ -965,6 +975,6 @@ body[data-connection="connecting"] .power-caption-status { color: var(--accent-2
   .home-dashboard .power-stage .power-caption { top: calc(50% + 108px); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sliding-text { transition: none; }
+  .split-flap-half { animation: none !important; }
   .power-button.connecting .power-core, .power-button.connecting .halo-two, .pulse.pending { animation: none; }
 }

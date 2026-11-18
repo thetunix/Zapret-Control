@@ -46,7 +46,7 @@ let editorLoadId = 0;
 let editorPreviewId = 0;
 let editorPreviewTimer = null;
 let pendingZapretOperation = null;
-const slideTimers = new WeakMap();
+const flipTimers = new WeakMap();
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -465,8 +465,8 @@ function renderState() {
   updateThemeSelection();
 }
 
-/** A clipped vertical text reveal: previous copy slides up, next copy rises into place. */
-function slideText(target, nextText) {
+/** Mechanical split-flap: fold the old top half, then unfold the new bottom half. */
+function flipText(target, nextText) {
   if (!target || target.dataset.displayedText === nextText) return;
   if (!target.dataset.displayedText && target.textContent === nextText) {
     target.dataset.displayedText = nextText;
@@ -474,29 +474,39 @@ function slideText(target, nextText) {
   }
   const previous = target.dataset.displayedText ?? target.textContent;
   target.dataset.displayedText = nextText;
-  clearTimeout(slideTimers.get(target));
+  clearTimeout(flipTimers.get(target));
   if (!previous || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    target.classList.remove('split-flap-active');
+    target.removeAttribute('aria-label');
     target.textContent = nextText;
     return;
   }
 
-  const oldText = document.createElement('span');
-  oldText.className = 'sliding-text sliding-old';
-  oldText.textContent = previous;
-  const newText = document.createElement('span');
-  newText.className = 'sliding-text sliding-next';
-  newText.textContent = nextText;
-  target.replaceChildren(oldText, newText);
-  // Force the initial offscreen position before transitioning in the next frame.
-  void newText.offsetWidth;
-  requestAnimationFrame(() => {
+  const half = (text, stage, position) => {
+    const panel = document.createElement('span');
+    panel.className = `split-flap-half split-flap-${stage} split-flap-${position}`;
+    panel.setAttribute('aria-hidden', 'true');
+    const copy = document.createElement('span');
+    copy.className = 'split-flap-copy';
+    copy.textContent = text;
+    panel.append(copy);
+    return panel;
+  };
+
+  target.classList.add('split-flap-active');
+  target.setAttribute('aria-label', nextText);
+  target.replaceChildren(
+    half(nextText, 'new', 'top'),
+    half(previous, 'old', 'bottom'),
+    half(previous, 'old', 'top'),
+    half(nextText, 'new', 'bottom')
+  );
+  flipTimers.set(target, setTimeout(() => {
     if (target.dataset.displayedText !== nextText) return;
-    oldText.classList.add('sliding-out');
-    newText.classList.add('sliding-in');
-  });
-  slideTimers.set(target, setTimeout(() => {
-    if (target.dataset.displayedText === nextText) target.textContent = nextText;
-  }, 470));
+    target.classList.remove('split-flap-active');
+    target.removeAttribute('aria-label');
+    target.textContent = nextText;
+  }, 600));
 }
 
 function renderConnectionState() {
@@ -507,9 +517,9 @@ function renderConnectionState() {
     : pendingZapretOperation === 'stop' ? 'Отключение…'
     : online ? 'Подключено' : 'Отключено';
 
-  slideText($('#statusText'), status);
-  slideText($('#powerStateLabel'), status);
-  slideText($('#miniStatus'), status);
+  flipText($('#statusText'), status);
+  flipText($('#powerStateLabel'), status);
+  flipText($('#miniStatus'), status);
   $('#powerStateHint').textContent = pendingZapretOperation === 'start'
     ? 'Применяем выбранную стратегию'
     : pendingZapretOperation === 'stop' ? 'Завершаем соединение'
@@ -563,7 +573,7 @@ function renderTgws() {
   if (!tgws) return;
   const label = tgws.busy ? (tgws.progress > 0 ? 'Загрузка…' : 'Подготовка…')
     : tgws.running ? 'Запущен' : tgws.installed ? 'Отключён' : 'Не установлен';
-  slideText($('#tgwsStateLabel'), label);
+  flipText($('#tgwsStateLabel'), label);
   $('#tgwsDescription').textContent = tgws.message || (tgws.running
     ? 'Прокси работает. Подключи Telegram через меню TGWS в трее.'
     : tgws.installed ? 'Готов к запуску. Telegram настраивается отдельно.'

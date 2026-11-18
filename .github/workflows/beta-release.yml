@@ -99,4 +99,4 @@ jobs:
             --latest=false `
             --target "$env:GITHUB_SHA" `
             --title "Zapret Control Center $env:BETA_VERSION (Beta)" `
-            --notes "Beta update: refined premium interface, responsive sliding protection states (Connected / Connecting / Disconnected), and one-click verified official Flowseal TG WS Proxy install and management. Fixed captions at narrow window widths. The installer includes winws.exe from the checksum-verified Flowseal 1.10.4 release, fixing fresh-install startup. Stable 0.2.8 remains available."
+            --notes "Beta update: real split-flap mechanical status animation, with hinged upper and lower halves for Connecting / Connected / Disconnected and Telegram Proxy states. Respects Windows reduced-motion settings. Includes the premium interface, TG WS Proxy from Flowseal and checksum-verified Flowseal winws.exe 1.10.4. Stable 0.2.8 remains available."
