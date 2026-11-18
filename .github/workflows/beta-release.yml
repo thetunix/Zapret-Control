@@ -47,6 +47,29 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # The repository intentionally does not commit Windows executables. Fetch
+      # winws.exe from the matching official Flowseal release before packaging.
+      - name: Include verified winws.exe from Flowseal
+        shell: pwsh
+        run: |
+          $version = "1.10.4"
+          $archiveName = "zapret-discord-youtube-$version.zip"
+          $url = "https://github.com/Flowseal/zapret-discord-youtube/releases/download/$version/$archiveName"
+          $expected = "291af673bd0238506f9548e0e94ca0abf244000f4c9a06960544fb01c5f97b34"
+          $archive = Join-Path $env:RUNNER_TEMP $archiveName
+          $unpacked = Join-Path $env:RUNNER_TEMP "flowseal-zapret"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Official Flowseal archive checksum mismatch" }
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpacked -Force
+          $binary = Get-ChildItem -Path $unpacked -Recurse -Filter "winws.exe" -File | Select-Object -First 1
+          if (-not $binary) { throw "winws.exe not found in official Flowseal archive" }
+          New-Item -ItemType Directory -Force -Path "zapret/bin" | Out-Null
+          Copy-Item -LiteralPath $binary.FullName -Destination "zapret/bin/winws.exe" -Force
+          if ((Get-Item "zapret/bin/winws.exe").Length -lt 100000) {
+            throw "winws.exe looks incomplete"
+          }
+
       - name: Build Windows NSIS installer
         run: npm run build -- --win nsis --publish never
 
@@ -76,4 +99,4 @@ jobs:
             --latest=false `
             --target "$env:GITHUB_SHA" `
             --title "Zapret Control Center $env:BETA_VERSION (Beta)" `
-            --notes "Beta update: visible numeric download percentages and smooth persistent progress bars for app and zapret downloads, plus a custom cloud app icon throughout Windows, the tray and installer. Stable 0.2.8 remains available."
+            --notes "Beta update: refined premium interface, smooth sliding protection states (Connected / Connecting / Disconnected), and one-click verified official Flowseal TG WS Proxy install and management. The installer now includes winws.exe from the checksum-verified Flowseal 1.10.4 release, fixing fresh-install startup. Stable 0.2.8 remains available."

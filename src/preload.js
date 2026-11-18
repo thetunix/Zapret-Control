@@ -15,6 +15,12 @@ contextBridge.exposeInMainWorld('zapret', {
   relaunchAdmin: () => invoke('admin:relaunch'),
   openRoot: () => invoke('path:openRoot'),
   openLogs: () => invoke('path:openLogs'),
+  tgwsStatus: () => invoke('tgws:status'),
+  tgwsInstall: () => invoke('tgws:install'),
+  tgwsStart: () => invoke('tgws:start'),
+  tgwsStop: () => invoke('tgws:stop'),
+  tgwsOpenFolder: () => invoke('tgws:openFolder'),
+  tgwsOpenRelease: () => invoke('tgws:openRelease'),
 
   start: (configName) => invoke('zapret:start', configName),
   stop: () => invoke('zapret:stop'),
@@ -61,5 +67,6 @@ contextBridge.exposeInMainWorld('zapret', {
   onTestsDone: (callback) => listen('tests:done', callback),
   onTestsError: (callback) => listen('tests:error', callback),
   onMonitor: (callback) => listen('monitor:update', callback),
-  onDiagnostics: (callback) => listen('diagnostics:update', callback)
+  onDiagnostics: (callback) => listen('diagnostics:update', callback),
+  onTgwsProgress: (callback) => listen('tgws:progress', callback)
 });

@@ -45,6 +45,8 @@ let editorModel = null;
 let editorLoadId = 0;
 let editorPreviewId = 0;
 let editorPreviewTimer = null;
+let pendingZapretOperation = null;
+const slideTimers = new WeakMap();
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -206,6 +208,12 @@ window.zapret.onDiagnostics((rows) => {
   renderDiagnostics();
 });
 
+window.zapret.onTgwsProgress((tgws) => {
+  if (!state) return;
+  state.tgws = tgws;
+  renderTgws();
+});
+
 function bindTabs() {
   $$('.nav-item').forEach((button) => {
     button.addEventListener('click', () => {
@@ -214,6 +222,7 @@ function bindTabs() {
       button.classList.add('active');
       $(`#tab-${button.dataset.tab}`).classList.add('active');
       if (button.dataset.tab === 'logs') refreshLogs();
+      if (button.dataset.tab === 'telegram') refreshTgws();
       if (button.dataset.tab === 'monitor' && !state?.monitor?.checkedAt) refreshMonitor();
       if (button.dataset.tab === 'settings') startMetricsTimer();
       else stopMetricsTimer();
@@ -261,14 +270,23 @@ function bindControls() {
   $('#adminBtn').addEventListener('click', () => window.zapret.relaunchAdmin());
 
   $('#startBtn').addEventListener('click', async () => {
+    if (pendingZapretOperation) return;
     if (state?.running?.active) {
-      await action(() => window.zapret.stop());
+      await runZapretOperation('stop', () => window.zapret.stop());
     } else {
-      await action(() => window.zapret.start($('#configSelect').value));
+      await runZapretOperation('start', () => window.zapret.start($('#configSelect').value));
     }
   });
-  $('#stopBtn').addEventListener('click', async () => action(() => window.zapret.stop()));
-  $('#restartBtn').addEventListener('click', async () => action(() => window.zapret.restart($('#configSelect').value)));
+  $('#stopBtn').addEventListener('click', async () => runZapretOperation('stop', () => window.zapret.stop()));
+  $('#restartBtn').addEventListener('click', async () => runZapretOperation('start', () => window.zapret.restart($('#configSelect').value)));
+  $('#tgwsReleaseBtn').addEventListener('click', () => window.zapret.tgwsOpenRelease());
+  $('#tgwsFolderBtn').addEventListener('click', () => window.zapret.tgwsOpenFolder());
+  $('#tgwsPrimaryBtn').addEventListener('click', async () => {
+    if (state?.tgws?.busy || state?.tgws?.running) return;
+    await tgwsAction(() => state?.tgws?.installed ? window.zapret.tgwsStart() : window.zapret.tgwsInstall());
+  });
+  $('#tgwsStopBtn').addEventListener('click', async () => tgwsAction(() => window.zapret.tgwsStop()));
+  $('#tgwsUpdateBtn').addEventListener('click', async () => tgwsAction(() => window.zapret.tgwsInstall()));
   $('#configSelect').addEventListener('change', async () => {
     await window.zapret.setSettings({ selectedConfig: $('#configSelect').value });
     await refreshState();
@@ -421,13 +439,8 @@ function renderState() {
   applyCustomTheme();
   applyVisualSettings();
   $('#rootPath').textContent = state.rootDir;
-  const adopted = state.running.active && state.running.externalCount > 0 && state.running.managedCount === 0;
-  $('#miniStatus').textContent = state.running.active ? (adopted ? 'winws подхвачен' : 'zapret включён') : 'zapret выключен';
-  $('#statusText').textContent = state.running.active ? (adopted ? 'winws подхвачен' : 'zapret работает') : 'zapret остановлен';
+  renderConnectionState();
   $('#processNote').textContent = renderProcessNote(state.running);
-  $('#statusPulse').classList.toggle('online', state.running.active);
-  $('#startBtn').classList.toggle('online', state.running.active);
-  $('#startBtn').setAttribute('aria-label', state.running.active ? 'Остановить zapret' : 'Включить zapret');
   $('#bestConfig').textContent = state.settings.bestConfig || 'не выбран';
   $('#serviceState').textContent = formatServiceState(state.service, 'short');
   $('#versionState').textContent = state.versions.local || 'n/a';
@@ -447,8 +460,125 @@ function renderState() {
   renderDownloadToast('zapret', state.update);
   renderMonitor();
   renderDiagnostics();
+  renderTgws();
   refreshEditorChoices();
   updateThemeSelection();
+}
+
+/** A clipped vertical text reveal: previous copy slides up, next copy rises into place. */
+function slideText(target, nextText) {
+  if (!target || target.dataset.displayedText === nextText) return;
+  if (!target.dataset.displayedText && target.textContent === nextText) {
+    target.dataset.displayedText = nextText;
+    return;
+  }
+  const previous = target.dataset.displayedText ?? target.textContent;
+  target.dataset.displayedText = nextText;
+  clearTimeout(slideTimers.get(target));
+  if (!previous || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    target.textContent = nextText;
+    return;
+  }
+
+  const oldText = document.createElement('span');
+  oldText.className = 'sliding-text sliding-old';
+  oldText.textContent = previous;
+  const newText = document.createElement('span');
+  newText.className = 'sliding-text sliding-next';
+  newText.textContent = nextText;
+  target.replaceChildren(oldText, newText);
+  // Force the initial offscreen position before transitioning in the next frame.
+  void newText.offsetWidth;
+  requestAnimationFrame(() => {
+    if (target.dataset.displayedText !== nextText) return;
+    oldText.classList.add('sliding-out');
+    newText.classList.add('sliding-in');
+  });
+  slideTimers.set(target, setTimeout(() => {
+    if (target.dataset.displayedText === nextText) target.textContent = nextText;
+  }, 470));
+}
+
+function renderConnectionState() {
+  if (!state?.running) return;
+  const online = Boolean(state.running.active);
+  const busy = Boolean(pendingZapretOperation);
+  const status = pendingZapretOperation === 'start' ? 'Подключение…'
+    : pendingZapretOperation === 'stop' ? 'Отключение…'
+    : online ? 'Подключено' : 'Отключено';
+
+  slideText($('#statusText'), status);
+  slideText($('#powerStateLabel'), status);
+  slideText($('#miniStatus'), status);
+  $('#powerStateHint').textContent = pendingZapretOperation === 'start'
+    ? 'Применяем выбранную стратегию'
+    : pendingZapretOperation === 'stop' ? 'Завершаем соединение'
+      : online ? 'Нажми, чтобы отключить защиту' : 'Нажми, чтобы подключиться';
+  $('#statusPulse').classList.toggle('online', online && !busy);
+  $('#statusPulse').classList.toggle('pending', busy);
+  $('#startBtn').classList.toggle('online', online);
+  $('#startBtn').classList.toggle('connecting', busy);
+  $('#startBtn').disabled = busy;
+  $('#startBtn').setAttribute('aria-label', busy ? status : online ? 'Отключить zapret' : 'Включить zapret');
+  document.body.dataset.connection = busy ? 'connecting' : online ? 'online' : 'offline';
+}
+
+async function runZapretOperation(operation, fn) {
+  if (pendingZapretOperation) return;
+  pendingZapretOperation = operation;
+  renderConnectionState();
+  try {
+    await action(fn);
+    await refreshState();
+  } finally {
+    pendingZapretOperation = null;
+    renderConnectionState();
+  }
+}
+
+async function refreshTgws() {
+  try {
+    const result = await window.zapret.tgwsStatus();
+    if (!state) state = {};
+    state.tgws = result;
+    renderTgws();
+  } catch (error) {
+    showToast('error', error.message || String(error), { title: 'Telegram Proxy' });
+  }
+}
+
+async function tgwsAction(fn) {
+  try {
+    const result = await fn();
+    if (state) state.tgws = result;
+    renderTgws();
+  } catch (error) {
+    showToast('error', error.message || String(error), { title: 'TG WS Proxy', duration: 9000 });
+    await refreshTgws();
+  }
+}
+
+function renderTgws() {
+  const tgws = state?.tgws;
+  if (!tgws) return;
+  const label = tgws.busy ? (tgws.progress > 0 ? 'Загрузка…' : 'Подготовка…')
+    : tgws.running ? 'Запущен' : tgws.installed ? 'Отключён' : 'Не установлен';
+  slideText($('#tgwsStateLabel'), label);
+  $('#tgwsDescription').textContent = tgws.message || (tgws.running
+    ? 'Прокси работает. Подключи Telegram через меню TGWS в трее.'
+    : tgws.installed ? 'Готов к запуску. Telegram настраивается отдельно.'
+      : 'Скачай официальный TG WS Proxy от Flowseal и подключи Telegram в трее.');
+  $('#tgwsVersion').textContent = tgws.version || '—';
+  const primary = $('#tgwsPrimaryBtn');
+  primary.textContent = tgws.busy ? 'Загрузка…' : tgws.running ? 'Работает' : tgws.installed ? 'Запустить' : 'Скачать и запустить';
+  primary.disabled = Boolean(tgws.busy || tgws.running);
+  $('#tgwsStopBtn').disabled = Boolean(tgws.busy || !tgws.running || !tgws.managed);
+  $('#tgwsStopBtn').title = tgws.running && !tgws.managed ? 'Запущен отдельно: остановите через трей' : '';
+  $('#tgwsUpdateBtn').hidden = !tgws.installed;
+  $('#tgwsUpdateBtn').disabled = Boolean(tgws.busy || tgws.running);
+  $('#tgwsDownload').hidden = !tgws.busy;
+  $('#tgwsPercent').textContent = `${Math.round(tgws.progress || 0)}%`;
+  $('#tgwsProgress').style.width = `${Math.max(0, Math.min(100, tgws.progress || 0))}%`;
 }
 
 function formatServiceState(service, mode = 'short') {

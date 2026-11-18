@@ -54,6 +54,11 @@
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5Zm10 0v4h4M8 11h8M8 15h8M8 19h5" /></svg>
             <span>Тесты</span>
           </button>
+          <button class="nav-item" data-tab="telegram">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m21 3-3 18-6.2-5-3.4 2 .9-4.3L21 3ZM11.8 16 21 3 3 11l6.3 2.7" /></svg>
+            <span>Telegram Proxy</span>
+            <span class="nav-tag">NEW</span>
+          </button>
           <button class="nav-item" data-tab="monitor">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg>
             <span>Мониторинг</span>
@@ -81,7 +86,7 @@
         </nav>
 
         <div class="sidebar-footer">
-          <div class="mini-status" id="miniStatus">Проверка...</div>
+          <div class="mini-status"><span class="sliding-label" id="miniStatus">Отключено</span></div>
           <button class="ghost-button" id="hideToTrayBtn">В трей</button>
         </div>
       </aside>
@@ -90,6 +95,7 @@
         <section class="tab-panel active" id="tab-home">
           <div class="toolbar">
             <div>
+              <div class="section-kicker">СЕТЬ ПОД КОНТРОЛЕМ</div>
               <h1>Главная</h1>
               <p id="rootPath">...</p>
             </div>
@@ -128,6 +134,7 @@
             </section>
 
             <section class="power-stage" aria-label="Управление zapret">
+              <span class="power-eyebrow">ZAPRET / NETWORK CONTROL</span>
               <button class="power-button" id="startBtn" type="button" aria-label="Включить или выключить zapret">
                 <span class="power-halo halo-one"></span>
                 <span class="power-halo halo-two"></span>
@@ -135,13 +142,18 @@
                   <span class="power-icon"></span>
                 </span>
               </button>
+              <div class="power-caption" role="status" aria-live="polite">
+                <span class="power-caption-caption">СОСТОЯНИЕ ЗАЩИТЫ</span>
+                <strong class="sliding-label power-caption-status" id="powerStateLabel">Отключено</strong>
+                <span class="power-caption-hint" id="powerStateHint">Нажми, чтобы подключиться</span>
+              </div>
             </section>
 
             <section class="home-bottom">
               <div class="status-block">
                 <div class="status-line">
                   <span class="pulse" id="statusPulse"></span>
-                  <span id="statusText">Проверка статуса</span>
+                  <span class="sliding-label" id="statusText">Отключено</span>
                 </div>
                 <div class="process-note" id="processNote">...</div>
 
@@ -180,6 +192,62 @@
             <div class="home-service-mini" aria-label="Доступность YouTube, Discord и Cloudflare">
               <div class="service-grid" id="homeServiceCards"></div>
             </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-telegram">
+          <div class="toolbar">
+            <div>
+              <div class="section-kicker">FLOWSEAL · MTProto</div>
+              <h1>Telegram Proxy</h1>
+              <p>Локальный TG WS Proxy для Telegram Desktop</p>
+            </div>
+            <div class="toolbar-actions">
+              <button class="ghost-button" id="tgwsReleaseBtn">Официальный проект ↗</button>
+            </div>
+          </div>
+
+          <div class="tgws-layout">
+            <section class="panel tgws-hero" aria-label="Управление TG WS Proxy">
+              <div class="tgws-hero-glow" aria-hidden="true"></div>
+              <div class="tgws-symbol" aria-hidden="true">
+                <svg viewBox="0 0 48 48"><path d="m41 8-6 33-12-9-6 4 2-9L41 8ZM23 32 41 8 7 22l12 5" /></svg>
+              </div>
+              <div class="section-kicker">TG WS PROXY</div>
+              <strong class="sliding-label tgws-status" id="tgwsStateLabel">Не установлен</strong>
+              <p id="tgwsDescription">Telegram-прокси устанавливается отдельно от Zapret и работает только локально.</p>
+              <div class="tgws-action-row">
+                <button class="primary-button" id="tgwsPrimaryBtn">Скачать прокси</button>
+                <button class="ghost-button" id="tgwsStopBtn" disabled>Остановить</button>
+                <button class="ghost-button" id="tgwsUpdateBtn" hidden>Обновить</button>
+                <button class="ghost-button" id="tgwsFolderBtn">Папка</button>
+              </div>
+              <div class="tgws-download" id="tgwsDownload" hidden>
+                <div class="tgws-download-label"><span>Загрузка официальной сборки</span><b id="tgwsPercent">0%</b></div>
+                <div class="progress"><span id="tgwsProgress"></span></div>
+              </div>
+              <div class="tgws-meta">
+                <span>Источник <b>Flowseal / GitHub</b></span>
+                <span>Версия <b id="tgwsVersion">—</b></span>
+                <span>Платформа <b>Windows x64</b></span>
+              </div>
+            </section>
+
+            <section class="tgws-info">
+              <div class="panel tgws-instructions">
+                <span class="section-kicker">КАК ПОДКЛЮЧИТЬ</span>
+                <h2>Telegram за три шага</h2>
+                <ol class="tgws-steps">
+                  <li><span>01</span><p><strong>Скачай и запусти</strong><small>Приложение TG WS Proxy появится в системном трее.</small></p></li>
+                  <li><span>02</span><p><strong>Открой прокси</strong><small>Правый клик по иконке TGWS → «Открыть в Telegram».</small></p></li>
+                  <li><span>03</span><p><strong>Подключись</strong><small>Telegram добавит локальный MTProto-прокси. Подтверди подключение.</small></p></li>
+                </ol>
+              </div>
+              <div class="panel tgws-note">
+                <span class="tgws-note-dot"></span>
+                <p><strong>Отдельно от Zapret</strong><br />TG WS Proxy не заменяет VPN и не переключает соединения остальных приложений. Используй кнопку в трее TGWS для настройки Telegram.</p>
+              </div>
+            </section>
           </div>
         </section>
 

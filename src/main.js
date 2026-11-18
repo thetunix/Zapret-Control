@@ -8,6 +8,7 @@ const path = require('node:path');
 const { describeStrategy, buildStrategy, customStrategyFilename } = require('./strategy-editor');
 const { TARGET_SERVICES, summarizeStrategy, pickAlternative, shouldSuggestSwitch, isHttpHealthy } = require('./smart-routing');
 const { monotonicDownloadPercent } = require('./download-progress');
+const { TgwsProxyManager, TGWS_RELEASES_URL } = require('./tgws-proxy');
 
 const APP_NAME = 'Zapret Control Center';
 const UPDATE_REPO = 'Flowseal/zapret-discord-youtube';
@@ -93,6 +94,13 @@ let lastAppUpdate = {
   progress: 0
 };
 let pendingAppInstallerPath = null;
+const tgwsManager = new TgwsProxyManager({
+  getUserData: () => app.getPath('userData'),
+  fetchJson: (url) => fetchJson(url),
+  downloadFile: (url, target, redirects, onProgress) => downloadFile(url, target, redirects, onProgress),
+  notify: (status) => send('tgws:progress', status),
+  log: (message, level) => log(message, level)
+});
 let cachedAdmin = null;
 let cachedServiceConfigName = undefined;
 let runtimeStatus = {
@@ -663,6 +671,15 @@ function registerIpc() {
   });
   ipcMain.handle('path:openRoot', () => shell.openPath(rootDir));
   ipcMain.handle('path:openLogs', () => shell.openPath(path.dirname(logFile)));
+  ipcMain.handle('tgws:status', () => tgwsManager.status());
+  ipcMain.handle('tgws:install', () => tgwsManager.install());
+  ipcMain.handle('tgws:start', () => tgwsManager.start());
+  ipcMain.handle('tgws:stop', () => tgwsManager.stop());
+  ipcMain.handle('tgws:openFolder', () => {
+    fs.mkdirSync(tgwsManager.directory, { recursive: true });
+    return shell.openPath(tgwsManager.directory);
+  });
+  ipcMain.handle('tgws:openRelease', () => shell.openExternal(TGWS_RELEASES_URL));
 
   ipcMain.handle('zapret:start', async (_event, configName) => {
     await startZapret(configName || settings.selectedConfig, { remember: true, reason: 'manual' });
@@ -989,9 +1006,10 @@ async function buildState() {
 }
 
 async function buildStateInner() {
-  const [{ running, service }, admin] = await Promise.all([
+  const [{ running, service }, admin, tgws] = await Promise.all([
     refreshRuntimeStatus(),
-    resolveAdminStatus()
+    resolveAdminStatus(),
+    tgwsManager.status()
   ]);
 
   return {
@@ -1004,6 +1022,7 @@ async function buildStateInner() {
     running,
     admin,
     service,
+    tgws,
     versions: {
       local: readLocalVersion(),
       latest: lastUpdate.latestVersion
