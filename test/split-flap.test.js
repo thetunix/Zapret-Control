@@ -47,31 +47,40 @@ test('status switches create hinged split-flap halves and settle on new text', (
   assert.equal(label.classList.contains('split-flap-active'), true);
   assert.equal(label.getAttribute('aria-label'), 'Подключение…');
   assert.deepEqual(label.children.map((node) => node.className), [
-    'split-flap-half split-flap-new split-flap-top',
-    'split-flap-half split-flap-old split-flap-bottom',
     'split-flap-half split-flap-old split-flap-top',
+    'split-flap-half split-flap-old split-flap-bottom'
+  ]);
+  assert.deepEqual(label.children.map((node) => node.children[0].textContent), [
+    'Отключено', 'Отключено'
+  ]);
+  assert.equal(timers[0].delay, 280);
+  assert.equal(timers[1].delay, 590);
+
+  timers[0].callback();
+  assert.deepEqual(label.children.map((node) => node.className), [
+    'split-flap-half split-flap-new split-flap-top',
     'split-flap-half split-flap-new split-flap-bottom'
   ]);
   assert.deepEqual(label.children.map((node) => node.children[0].textContent), [
-    'Подключение…', 'Отключено', 'Отключено', 'Подключение…'
+    'Подключение…', 'Подключение…'
   ]);
-  assert.equal(timers[0].delay, 600);
 
-  timers[0].callback();
+  timers[1].callback();
   assert.equal(label.textContent, 'Подключение…');
   assert.equal(label.classList.contains('split-flap-active'), false);
   assert.equal(label.getAttribute('aria-label'), undefined);
 
   flipText(label, 'Подключено');
   assert.equal(label.dataset.displayedText, 'Подключено');
-  timers[1].callback();
+  timers[2].callback();
+  timers[3].callback();
   assert.equal(label.textContent, 'Подключено');
 });
 
-test('split-flap has two staggered 3D folds and a reduced-motion fallback', () => {
+test('split-flap has two phased 3D folds and a reduced-motion fallback', () => {
   assert.match(styles, /@keyframes splitFlapFold/);
   assert.match(styles, /@keyframes splitFlapUnfold/);
-  assert.match(styles, /\.split-flap-new-bottom\s*\{[^}]*280ms 280ms/);
+  assert.match(styles, /\.split-flap-new-bottom\s*\{[^}]*animation: splitFlapUnfold 280ms/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
   assert.doesNotMatch(styles, /\.sliding-next\s*\{/);
 });

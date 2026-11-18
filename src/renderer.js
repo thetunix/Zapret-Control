@@ -474,7 +474,11 @@ function flipText(target, nextText) {
   }
   const previous = target.dataset.displayedText ?? target.textContent;
   target.dataset.displayedText = nextText;
-  clearTimeout(flipTimers.get(target));
+  const activeTimers = flipTimers.get(target);
+  if (activeTimers) {
+    clearTimeout(activeTimers.midpoint);
+    clearTimeout(activeTimers.finish);
+  }
   if (!previous || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     target.classList.remove('split-flap-active');
     target.removeAttribute('aria-label');
@@ -496,17 +500,25 @@ function flipText(target, nextText) {
   target.classList.add('split-flap-active');
   target.setAttribute('aria-label', nextText);
   target.replaceChildren(
-    half(nextText, 'new', 'top'),
-    half(previous, 'old', 'bottom'),
     half(previous, 'old', 'top'),
-    half(nextText, 'new', 'bottom')
+    half(previous, 'old', 'bottom')
   );
-  flipTimers.set(target, setTimeout(() => {
+  // Only one word is painted at a time. Keeping both words behind translucent
+  // flaps caused duplicate glyphs to overlap during the transition.
+  const midpoint = setTimeout(() => {
+    if (target.dataset.displayedText !== nextText) return;
+    target.replaceChildren(
+      half(nextText, 'new', 'top'),
+      half(nextText, 'new', 'bottom')
+    );
+  }, 280);
+  const finish = setTimeout(() => {
     if (target.dataset.displayedText !== nextText) return;
     target.classList.remove('split-flap-active');
     target.removeAttribute('aria-label');
     target.textContent = nextText;
-  }, 600));
+  }, 590);
+  flipTimers.set(target, { midpoint, finish });
 }
 
 function renderConnectionState() {
@@ -921,10 +933,18 @@ function initThemes() {
     button.innerHTML = `<span></span><strong>${theme.name}</strong><small>${theme.hint}</small>`;
     button.addEventListener('click', async () => {
       document.body.dataset.theme = theme.id;
+      updateThemeSelection();
       await patchSetting({ theme: theme.id });
     });
     grid.appendChild(button);
   }
+
+  $('#themePrevBtn')?.addEventListener('click', () => {
+    grid.scrollBy({ left: -Math.max(180, grid.clientWidth * .8), behavior: 'smooth' });
+  });
+  $('#themeNextBtn')?.addEventListener('click', () => {
+    grid.scrollBy({ left: Math.max(180, grid.clientWidth * .8), behavior: 'smooth' });
+  });
 }
 
 function readCustomThemeInputs() {
@@ -981,10 +1001,20 @@ function hslToHex(h, s, l) {
 }
 
 function updateThemeSelection() {
-  const active = state?.settings?.theme || document.body.dataset.theme || 'aurora';
+  const active = document.body.dataset.theme || state?.settings?.theme || 'aurora';
+  const theme = themes.find((item) => item.id === active);
+  const caption = $('#currentThemeName');
+  if (caption) caption.textContent = theme?.name || active;
+  const grid = $('#themeGrid');
   $$('#themeGrid .theme-swatch').forEach((button) => {
     button.classList.toggle('active', button.dataset.theme === active);
+    button.setAttribute('aria-pressed', String(button.dataset.theme === active));
   });
+  if (grid && grid.dataset.selectedTheme !== active) {
+    grid.dataset.selectedTheme = active;
+    const button = $$('#themeGrid .theme-swatch').find((item) => item.dataset.theme === active);
+    if (button) grid.scrollTo({ left: Math.max(0, button.offsetLeft - grid.offsetLeft - (grid.clientWidth - button.offsetWidth) / 2), behavior: 'smooth' });
+  }
 }
 
 function renderThemes() {

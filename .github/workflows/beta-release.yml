@@ -99,4 +99,4 @@ jobs:
             --latest=false `
             --target "$env:GITHUB_SHA" `
             --title "Zapret Control Center $env:BETA_VERSION (Beta)" `
-            --notes "Beta update: real split-flap mechanical status animation, with hinged upper and lower halves for Connecting / Connected / Disconnected and Telegram Proxy states. Respects Windows reduced-motion settings. Includes the premium interface, TG WS Proxy from Flowseal and checksum-verified Flowseal winws.exe 1.10.4. Stable 0.2.8 remains available."
+            --notes "Beta update: fixes overlapping split-flap status text using two-phase flips; raises and separates the power control and status caption; moves automation switches into Settings; places check and release icon actions vertically; replaces the oversized theme grid with a horizontal carousel; and refreshes the cloud icon with a transparent background and white power symbol. Includes TG WS Proxy and checksum-verified Flowseal winws.exe 1.10.4. Stable 0.2.8 remains available."

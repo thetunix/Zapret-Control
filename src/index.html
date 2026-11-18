@@ -37,7 +37,7 @@
       <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark">
-            <img src="./assets/app-icon.png" alt="" />
+            <img src="./assets/app-icon.svg" alt="" />
           </div>
           <div>
             <div class="brand-title">Zapret</div>
@@ -112,42 +112,34 @@
           </div>
 
           <div class="home-dashboard">
-            <section class="panel auto-panel">
-              <h2>Авто</h2>
-              <div class="switch-row">
-                <span>Запуск приложения с Windows</span>
-                <label class="switch"><input type="checkbox" id="launchAtLoginToggle" /><span></span></label>
-              </div>
-              <div class="switch-row">
-                <span>Включать лучший конфиг при старте</span>
-                <label class="switch"><input type="checkbox" id="autoStartToggle" /><span></span></label>
-              </div>
-              <div class="switch-row">
-                <span>Автообновление zapret</span>
-                <label class="switch"><input type="checkbox" id="autoUpdateToggle" /><span></span></label>
-              </div>
-              <div class="button-row">
-                <button class="ghost-button" id="checkUpdateBtn">Проверить</button>
-                <button class="ghost-button" id="openReleaseBtn">Релиз</button>
-              </div>
-              <div class="notice" id="updateNotice">...</div>
-            </section>
-
-            <section class="power-stage" aria-label="Управление zapret">
-              <span class="power-eyebrow">ZAPRET / NETWORK CONTROL</span>
-              <button class="power-button" id="startBtn" type="button" aria-label="Включить или выключить zapret">
-                <span class="power-halo halo-one"></span>
-                <span class="power-halo halo-two"></span>
-                <span class="power-core">
-                  <span class="power-icon"></span>
-                </span>
+            <div class="home-quick-actions" aria-label="Обновление zapret">
+              <button class="home-quick-action" id="checkUpdateBtn" type="button" title="Проверить обновление zapret">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 1-2.7-5.9M20 4v6h-6"/><path d="M9 12.5l2 2 4-4"/></svg>
+                <span>Проверить</span>
               </button>
+              <button class="home-quick-action" id="openReleaseBtn" type="button" title="Открыть официальный релиз zapret">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 16v4h16v-4"/></svg>
+                <span>Релиз</span>
+              </button>
+            </div>
+
+            <div class="power-zone">
+              <section class="power-stage" aria-label="Управление zapret">
+                <span class="power-eyebrow">ZAPRET / NETWORK CONTROL</span>
+                <button class="power-button" id="startBtn" type="button" aria-label="Включить или выключить zapret">
+                  <span class="power-halo halo-one"></span>
+                  <span class="power-halo halo-two"></span>
+                  <span class="power-core">
+                    <span class="power-icon"></span>
+                  </span>
+                </button>
+              </section>
               <div class="power-caption" role="status" aria-live="polite">
                 <span class="power-caption-caption">СОСТОЯНИЕ ЗАЩИТЫ</span>
                 <strong class="sliding-label power-caption-status" id="powerStateLabel">Отключено</strong>
                 <span class="power-caption-hint" id="powerStateHint">Нажми, чтобы подключиться</span>
               </div>
-            </section>
+            </div>
 
             <section class="home-bottom">
               <div class="status-block">
@@ -387,8 +379,36 @@
 
           <section class="settings-grid">
             <div class="panel">
-              <h2>Темы</h2>
-              <div class="theme-grid" id="themeGrid"></div>
+              <h2>Автоматика</h2>
+              <div class="switch-row">
+                <span>Запуск приложения с Windows</span>
+                <label class="switch"><input type="checkbox" id="launchAtLoginToggle" /><span></span></label>
+              </div>
+              <div class="switch-row">
+                <span>Включать лучший конфиг при старте</span>
+                <label class="switch"><input type="checkbox" id="autoStartToggle" /><span></span></label>
+              </div>
+              <div class="switch-row">
+                <span>Автообновление zapret</span>
+                <label class="switch"><input type="checkbox" id="autoUpdateToggle" /><span></span></label>
+              </div>
+              <div class="notice" id="updateNotice">...</div>
+            </div>
+
+            <div class="panel">
+              <div class="theme-slider-heading">
+                <h2>Темы</h2>
+                <span id="currentThemeName">Figma Dark</span>
+              </div>
+              <div class="theme-slider">
+                <button class="theme-slide-arrow" id="themePrevBtn" type="button" aria-label="Предыдущие темы">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>
+                </button>
+                <div class="theme-grid" id="themeGrid" aria-label="Выбор темы интерфейса"></div>
+                <button class="theme-slide-arrow" id="themeNextBtn" type="button" aria-label="Следующие темы">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg>
+                </button>
+              </div>
 
               <div class="custom-theme">
                 <h2>Своя тема</h2>
