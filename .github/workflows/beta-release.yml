@@ -99,4 +99,4 @@ jobs:
             --latest=false `
             --target "$env:GITHUB_SHA" `
             --title "Zapret Control Center $env:BETA_VERSION (Beta)" `
-            --notes "Beta UI correction: the power button now occupies the upper center as in the user's layout reference; protection status and service indicators sit together in the lower middle column between the configuration and quick logs. Removes the overly tight status caption under the power button, with responsive narrow-window fallback. Retains TG WS Proxy Telegram connection, verified updates, and the previous themed status animations."
+            --notes "Beta UI polish: ZAPRET / NETWORK CONTROL caption now sits above the outer power-button halo instead of overlapping its ring. Duplicate matching error notifications are collapsed into a single toast. Retains beta.13 layout with the protection status and service indicators in the lower center, plus TG WS Proxy direct Telegram connection, safe auto-updates, and themed status animations."

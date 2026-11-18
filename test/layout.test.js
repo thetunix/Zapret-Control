@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'src/index.html'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'src/styles.css'), 'utf8');
+const renderer = fs.readFileSync(path.join(root, 'src/renderer.js'), 'utf8');
 
 test('power caption is outside the button stage and quick actions are separate', () => {
   const home = html.split('id="tab-home"')[1].split('id="tab-telegram"')[0];
@@ -35,6 +36,14 @@ test('home layout keeps the power control above a centered status and service ro
   assert.equal(home.split('id="powerStateLabel"').length - 1, 1);
   assert.match(css, /\.home-dashboard\s*\{[^}]*grid-template-rows:/);
   assert.match(css, /\.home-bottom\s*\{[^}]*grid-template-columns: minmax\(220px, 300px\) minmax\(220px, 1fr\) minmax\(220px, 300px\)/);
+});
+
+test('power eyebrow clears the outer halo and identical error notices do not stack', () => {
+  const eyebrow = css.match(/\.power-stage \.power-eyebrow\s*\{([^}]+)\}/)?.[1];
+  assert.ok(eyebrow);
+  const offset = Number(eyebrow.match(/top:\s*(-?\d+)px/)?.[1]);
+  assert.ok(offset <= -60, `expected label clear of halo, got ${offset}px`);
+  assert.match(renderer, /node\.dataset\.toastKey === toastKey/);
 });
 
 test('automation moved to settings, themes use a horizontal slider', () => {

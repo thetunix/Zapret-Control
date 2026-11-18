@@ -911,7 +911,8 @@ h2 { font-weight: 650; }
 .power-button.connecting .halo-two { animation: powerHalo 1.3s ease-out infinite; }
 .power-button:disabled { cursor: wait; }
 .power-stage .power-eyebrow {
-  position: absolute; top: -29px; left: 50%; transform: translateX(-50%);
+  /* Keep the label above the outer halo rather than across the power ring. */
+  position: absolute; top: -63px; left: 50%; transform: translateX(-50%);
   color: color-mix(in srgb, var(--muted) 83%, #fff); font-size: 10px; font-weight: 700;
   white-space: nowrap; letter-spacing: .22em;
 }

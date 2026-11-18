@@ -983,6 +983,12 @@ function showToast(type, message, options = {}) {
   const stack = $('#toastStack');
   if (!stack || !message) return;
 
+  // One failed operation may be reported more than once via IPC and the UI.
+  // Keep a single visible notification for the same error instead of stacking copies.
+  const toastKey = JSON.stringify([type, options.title || '', message]);
+  if (Array.from(stack.querySelectorAll('.toast:not(.toast-download)'))
+    .some((node) => node.dataset.toastKey === toastKey)) return;
+
   // Уведомление с тем же действием заменяем, а не копим — иначе стопка растёт бесконечно.
   if (options.action) {
     stack.querySelectorAll(`[data-action="${options.action}"]`).forEach((node) => node.remove());
@@ -994,6 +1000,7 @@ function showToast(type, message, options = {}) {
 
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}${options.action ? ' toast-actionable' : ''}`;
+  toast.dataset.toastKey = toastKey;
   if (options.action) toast.dataset.action = options.action;
 
   const titleHtml = options.title ? `<strong>${escapeHtml(options.title)}</strong>` : '';
