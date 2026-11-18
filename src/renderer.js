@@ -296,7 +296,34 @@ function bindControls() {
     await tgwsAction(() => state?.tgws?.installed ? window.zapret.tgwsStart() : window.zapret.tgwsInstall());
   });
   $('#tgwsStopBtn').addEventListener('click', async () => tgwsAction(() => window.zapret.tgwsStop()));
-  $('#tgwsUpdateBtn').addEventListener('click', async () => tgwsAction(() => window.zapret.tgwsInstall()));
+  $('#tgwsUpdateBtn').addEventListener('click', async () => tgwsAction(() => window.zapret.tgwsUpdate()));
+  $('#tgwsCheckUpdateBtn').addEventListener('click', async () => {
+    try {
+      const status = await window.zapret.tgwsCheckUpdate();
+      if (!state) state = {};
+      state.tgws = status;
+      renderTgws();
+      showToast('success', status.updateAvailable ? `Доступна версия ${status.latestVersion}` : 'Установлена последняя версия TG WS Proxy', { title: 'TG WS Proxy' });
+    } catch (error) {
+      showToast('error', error.message || String(error), { title: 'Проверка обновлений TG WS Proxy' });
+    }
+  });
+  $('#tgwsConnectBtn').addEventListener('click', async () => {
+    try {
+      await window.zapret.tgwsConnect();
+      showToast('success', 'Подтверди добавление прокси в Telegram', { title: 'Telegram' });
+    } catch (error) {
+      showToast('error', error.message || String(error), { title: 'Подключение Telegram', duration: 9000 });
+    }
+  });
+  $('#tgwsCopyBtn').addEventListener('click', async () => {
+    try {
+      await window.zapret.tgwsCopyLink();
+      showToast('success', 'Ссылка скопирована. Открой её через Telegram', { title: 'TG WS Proxy' });
+    } catch (error) {
+      showToast('error', error.message || String(error), { title: 'TG WS Proxy' });
+    }
+  });
   $('#configSelect').addEventListener('change', async () => {
     await window.zapret.setSettings({ selectedConfig: $('#configSelect').value });
     await refreshState();
@@ -664,8 +691,20 @@ function renderTgws() {
   primary.disabled = Boolean(tgws.busy || tgws.running);
   $('#tgwsStopBtn').disabled = Boolean(tgws.busy || !tgws.running || !tgws.managed);
   $('#tgwsStopBtn').title = tgws.running && !tgws.managed ? 'Запущен отдельно: остановите через трей' : '';
-  $('#tgwsUpdateBtn').hidden = !tgws.installed;
-  $('#tgwsUpdateBtn').disabled = Boolean(tgws.busy || tgws.running);
+  $('#tgwsConnectBtn').hidden = !tgws.installed;
+  $('#tgwsConnectBtn').disabled = Boolean(tgws.busy || !tgws.running);
+  $('#tgwsCopyBtn').hidden = !tgws.installed;
+  $('#tgwsCopyBtn').disabled = Boolean(tgws.busy || !tgws.running);
+  $('#tgwsUpdateRow').hidden = !tgws.installed;
+  $('#tgwsUpdateDescription').textContent = tgws.updateError ? `Ошибка проверки: ${tgws.updateError}`
+    : tgws.checkingUpdate ? 'Проверяем релизы Flowseal…'
+      : tgws.updateAvailable ? `Доступна ${tgws.latestVersion} · установлена ${tgws.version}`
+        : tgws.latestVersion ? `Последняя версия ${tgws.latestVersion} установлена` : 'Проверка обновлений TG WS Proxy';
+  $('#tgwsCheckUpdateBtn').disabled = Boolean(tgws.busy || tgws.checkingUpdate);
+  $('#tgwsUpdateBtn').hidden = !tgws.updateAvailable;
+  $('#tgwsUpdateBtn').disabled = Boolean(tgws.busy || tgws.checkingUpdate || (tgws.running && !tgws.managed));
+  $('#tgwsUpdateBtn').title = tgws.running && !tgws.managed ? 'Остановите внешний TG WS Proxy через трей' : '';
+  $('#tgwsUpdateBtn').textContent = tgws.running ? 'Обновить и перезапустить' : 'Обновить';
   $('#tgwsDownload').hidden = !tgws.busy;
   $('#tgwsPercent').textContent = `${Math.round(tgws.progress || 0)}%`;
   $('#tgwsProgress').style.width = `${Math.max(0, Math.min(100, tgws.progress || 0))}%`;

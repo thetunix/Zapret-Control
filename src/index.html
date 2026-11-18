@@ -210,9 +210,21 @@
               <p id="tgwsDescription">Telegram-прокси устанавливается отдельно от Zapret и работает только локально.</p>
               <div class="tgws-action-row">
                 <button class="primary-button" id="tgwsPrimaryBtn">Скачать прокси</button>
+                <button class="tgws-connect-button" id="tgwsConnectBtn" hidden>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 3-3.5 17-6.2-4.5-3.2 3 .7-5L21 3ZM11.3 15.5 21 3 3 10.7l5.8 2.8"/></svg>
+                  Подключить Telegram
+                </button>
                 <button class="ghost-button" id="tgwsStopBtn" disabled>Остановить</button>
-                <button class="ghost-button" id="tgwsUpdateBtn" hidden>Обновить</button>
+                <button class="ghost-button" id="tgwsCopyBtn" hidden title="Скопировать ссылку tg://proxy">Скопировать ссылку</button>
                 <button class="ghost-button" id="tgwsFolderBtn">Папка</button>
+              </div>
+              <div class="tgws-update-row" id="tgwsUpdateRow" hidden>
+                <div class="tgws-update-detail">
+                  <span class="tgws-update-dot" aria-hidden="true"></span>
+                  <span id="tgwsUpdateDescription">Проверить наличие новой версии</span>
+                </div>
+                <button class="ghost-button" id="tgwsCheckUpdateBtn">Проверить</button>
+                <button class="primary-button" id="tgwsUpdateBtn" hidden>Обновить</button>
               </div>
               <div class="tgws-download" id="tgwsDownload" hidden>
                 <div class="tgws-download-label"><span>Загрузка официальной сборки</span><b id="tgwsPercent">0%</b></div>
@@ -231,13 +243,13 @@
                 <h2>Telegram за три шага</h2>
                 <ol class="tgws-steps">
                   <li><span>01</span><p><strong>Скачай и запусти</strong><small>Приложение TG WS Proxy появится в системном трее.</small></p></li>
-                  <li><span>02</span><p><strong>Открой прокси</strong><small>Правый клик по иконке TGWS → «Открыть в Telegram».</small></p></li>
+                  <li><span>02</span><p><strong>Открой Telegram</strong><small>Нажми «Подключить Telegram» прямо здесь — параметры берутся из настроек прокси.</small></p></li>
                   <li><span>03</span><p><strong>Подключись</strong><small>Telegram добавит локальный MTProto-прокси. Подтверди подключение.</small></p></li>
                 </ol>
               </div>
               <div class="panel tgws-note">
                 <span class="tgws-note-dot"></span>
-                <p><strong>Отдельно от Zapret</strong><br />TG WS Proxy не заменяет VPN и не переключает соединения остальных приложений. Используй кнопку в трее TGWS для настройки Telegram.</p>
+                <p><strong>Отдельно от Zapret</strong><br />TG WS Proxy не заменяет VPN. Если Telegram не открывается по кнопке, скопируй ссылку и отправь её себе в «Избранное». Обновления TGWS проверяются автоматически.</p>
               </div>
             </section>
           </div>

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, shell, globalShortcut, powerMonitor } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, shell, clipboard, globalShortcut, powerMonitor } = require('electron');
 const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const dns = require('node:dns').promises;
@@ -245,6 +245,16 @@ async function bootstrap() {
       });
     }, 6000);
   }
+
+  // Update the separately installed Flowseal proxy when it is safely stopped.
+  // An active Telegram connection is never interrupted by background updates.
+  const autoUpdateTgws = async () => {
+    if (!tgwsManager.installed) return;
+    try { await tgwsManager.update({ automatic: true }); }
+    catch (error) { log(`TG WS Proxy: не удалось проверить обновление: ${error.message}`, 'error'); }
+  };
+  setTimeout(autoUpdateTgws, 11000).unref();
+  setInterval(autoUpdateTgws, 6 * 60 * 60 * 1000).unref();
 
   if (settings.autoUpdateZapret) {
     checkForZapretUpdate({ apply: true }).catch((error) => {
@@ -675,6 +685,20 @@ function registerIpc() {
   ipcMain.handle('tgws:install', () => tgwsManager.install());
   ipcMain.handle('tgws:start', () => tgwsManager.start());
   ipcMain.handle('tgws:stop', () => tgwsManager.stop());
+  ipcMain.handle('tgws:checkUpdate', () => tgwsManager.checkForUpdate({ force: true }));
+  ipcMain.handle('tgws:update', () => tgwsManager.update());
+  ipcMain.handle('tgws:connect', async () => {
+    const status = await tgwsManager.status();
+    if (!status.running) throw new Error('Сначала запустите TG WS Proxy');
+    const link = tgwsManager.getTelegramLink();
+    await shell.openExternal(link);
+    return { opened: true };
+  });
+  ipcMain.handle('tgws:copyLink', async () => {
+    if (!(await tgwsManager.status()).running) throw new Error('Сначала запустите TG WS Proxy');
+    clipboard.writeText(tgwsManager.getTelegramLink());
+    return { copied: true };
+  });
   ipcMain.handle('tgws:openFolder', () => {
     fs.mkdirSync(tgwsManager.directory, { recursive: true });
     return shell.openPath(tgwsManager.directory);

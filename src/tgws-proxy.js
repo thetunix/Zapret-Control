@@ -3,6 +3,7 @@
 const { spawn, execFile } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const fs = require('node:fs');
+const net = require('node:net');
 const path = require('node:path');
 const { promisify } = require('node:util');
 
@@ -11,6 +12,30 @@ const TGWS_REPO = 'Flowseal/tg-ws-proxy';
 const TGWS_RELEASE_API = `https://api.github.com/repos/${TGWS_REPO}/releases/latest`;
 const TGWS_RELEASES_URL = `https://github.com/${TGWS_REPO}/releases`;
 const TGWS_EXE_NAME = 'TgWsProxy_windows.exe';
+const UPDATE_CHECK_TTL = 15 * 60 * 1000;
+
+function compareReleaseVersions(local, latest) {
+  if (!/^v?\d+(?:\.\d+)*$/i.test(latest)) return 0;
+  if (!/^v?\d+(?:\.\d+)*$/i.test(local)) return -1;
+  const a = local.replace(/^v/i, '').split('.').map(Number);
+  const b = latest.replace(/^v/i, '').split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0) ? 1 : -1;
+  }
+  return 0;
+}
+
+function telegramProxyLink(config) {
+  const host = String(config?.host || '127.0.0.1');
+  const port = Number(config?.port);
+  const secret = String(config?.secret || '');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Некорректный порт в настройках TG WS Proxy');
+  if (!/^[0-9a-f]{32}$/i.test(secret)) throw new Error('Не удалось прочитать ключ TG WS Proxy. Запустите прокси и проверьте его настройки');
+  // TGWS runs on this machine. A wildcard bind address is not a usable Telegram destination.
+  const address = host === '0.0.0.0' || host === 'localhost' || host === '::' ? '127.0.0.1' : host;
+  if (!net.isIP(address)) throw new Error('Неизвестный адрес прокси в настройках TG WS Proxy');
+  return `tg://proxy?${new URLSearchParams({ server: address, port: String(port), secret: `dd${secret}` })}`;
+}
 
 function selectWindowsReleaseAsset(release) {
   const asset = release?.assets?.find((entry) => entry.name === TGWS_EXE_NAME);
@@ -53,11 +78,16 @@ class TgwsProxyManager {
     this.message = '';
     this.externalCheckedAt = 0;
     this.externalRunning = false;
+    this.latestAsset = null;
+    this.lastCheckedAt = 0;
+    this.updateCheckPromise = null;
+    this.updateError = '';
   }
 
   get directory() { return path.join(this.getUserData(), 'tgws-proxy'); }
   get executable() { return path.join(this.directory, TGWS_EXE_NAME); }
   get manifestFile() { return path.join(this.directory, 'release.json'); }
+  get configFile() { return path.join(this.directory, 'TgWsProxy_data', 'config.json'); }
 
   get installed() { return fs.existsSync(this.executable); }
 
@@ -85,13 +115,78 @@ class TgwsProxyManager {
       busy: this.busy,
       progress: this.progress,
       version: this.localVersion,
+      latestVersion: this.latestAsset?.version || null,
+      updateAvailable: Boolean(this.installed && this.latestAsset && compareReleaseVersions(this.localVersion, this.latestAsset.version) < 0),
+      checkingUpdate: Boolean(this.updateCheckPromise),
+      updateError: this.updateError,
       message: this.message
     };
   }
 
   async broadcast() { this.notify(await this.status()); }
 
-  async install({ startAfter = true } = {}) {
+  getTelegramLink() {
+    if (!this.installed) throw new Error('Сначала скачайте TG WS Proxy');
+    let config;
+    try { config = JSON.parse(fs.readFileSync(this.configFile, 'utf8')); }
+    catch { throw new Error('Настройки TG WS Proxy ещё не созданы. Запустите его и повторите подключение'); }
+    return telegramProxyLink(config);
+  }
+
+  async checkForUpdate({ force = false } = {}) {
+    if (this.platform !== 'win32' || !this.installed) return this.status();
+    if (this.updateCheckPromise) return this.updateCheckPromise;
+    if (!force && this.latestAsset && Date.now() - this.lastCheckedAt < UPDATE_CHECK_TTL) return this.status();
+
+    const check = (async () => {
+      try {
+        const asset = selectWindowsReleaseAsset(await this.fetchJson(TGWS_RELEASE_API));
+        this.latestAsset = asset;
+        this.lastCheckedAt = Date.now();
+        this.updateError = '';
+        this.log(`TG WS Proxy: установлен ${this.localVersion}, последний релиз ${asset.version}`);
+      } catch (error) {
+        this.updateError = error.message;
+        this.log(`Проверка обновлений TG WS Proxy: ${error.message}`, 'error');
+        throw error;
+      } finally {
+        this.updateCheckPromise = null;
+        await this.broadcast();
+      }
+      return this.status();
+    })();
+    this.updateCheckPromise = check;
+    await this.broadcast();
+    return check;
+  }
+
+  async update({ automatic = false } = {}) {
+    if (!this.installed) throw new Error('Сначала установите TG WS Proxy');
+    await this.checkForUpdate({ force: !automatic });
+    if (!this.latestAsset || compareReleaseVersions(this.localVersion, this.latestAsset.version) >= 0) {
+      this.message = `Установлена актуальная версия TG WS Proxy (${this.localVersion})`;
+      await this.broadcast();
+      return this.status();
+    }
+    const running = await this.status();
+    if (running.running && (!running.managed || automatic)) {
+      if (automatic) return running;
+      throw new Error('Прокси запущен отдельно. Остановите его через трей перед обновлением');
+    }
+    const shouldRestart = running.running && running.managed;
+    if (shouldRestart) await this.stop();
+    try {
+      return await this.install({ startAfter: shouldRestart, asset: this.latestAsset });
+    } catch (error) {
+      // A checksum/network failure leaves the previous verified binary available.
+      if (shouldRestart && this.installed) {
+        try { await this.start(); } catch (restartError) { this.log(`Не удалось вернуть TG WS Proxy: ${restartError.message}`, 'error'); }
+      }
+      throw error;
+    }
+  }
+
+  async install({ startAfter = true, asset: knownAsset = null } = {}) {
     if (this.platform !== 'win32') throw new Error('TG WS Proxy поддерживается только на Windows');
     if (this.busy) throw new Error('Загрузка TG WS Proxy уже выполняется');
     if ((await this.status()).running) throw new Error('Сначала остановите TG WS Proxy через системный трей');
@@ -103,7 +198,7 @@ class TgwsProxyManager {
     const partPath = `${this.executable}.download`;
 
     try {
-      const asset = selectWindowsReleaseAsset(await this.fetchJson(TGWS_RELEASE_API));
+      const asset = knownAsset || selectWindowsReleaseAsset(await this.fetchJson(TGWS_RELEASE_API));
       this.message = 'Скачиваю официальную Windows-сборку…';
       await this.broadcast();
       await this.downloadFile(asset.url, partPath, 0, (loaded, total) => {
@@ -119,8 +214,22 @@ class TgwsProxyManager {
       if ((await sha256File(partPath)) !== asset.sha256) {
         throw new Error('Контрольная сумма TG WS Proxy не совпадает. Файл не установлен');
       }
-      fs.renameSync(partPath, this.executable);
+      // Windows cannot rename a file over an existing exe; keep a reversible backup.
+      const backupPath = `${this.executable}.previous`;
+      if (this.installed) {
+        fs.rmSync(backupPath, { force: true });
+        fs.renameSync(this.executable, backupPath);
+        try { fs.renameSync(partPath, this.executable); }
+        catch (error) {
+          fs.renameSync(backupPath, this.executable);
+          throw error;
+        }
+        fs.rmSync(backupPath, { force: true });
+      } else fs.renameSync(partPath, this.executable);
       fs.writeFileSync(this.manifestFile, JSON.stringify({ version: asset.version, sha256: asset.sha256 }, null, 2));
+      this.latestAsset = asset;
+      this.lastCheckedAt = Date.now();
+      this.updateError = '';
       this.progress = 100;
       this.message = 'Установлено из официального релиза Flowseal';
       this.log(`TG WS Proxy ${asset.version} установлен (SHA-256 подтверждён)`);
@@ -190,4 +299,4 @@ class TgwsProxyManager {
   }
 }
 
-module.exports = { TGWS_RELEASES_URL, selectWindowsReleaseAsset, sha256File, TgwsProxyManager };
+module.exports = { TGWS_RELEASES_URL, selectWindowsReleaseAsset, compareReleaseVersions, telegramProxyLink, sha256File, TgwsProxyManager };

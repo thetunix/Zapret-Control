@@ -971,6 +971,15 @@ body[data-connection="connecting"] .power-caption-status { color: var(--accent-2
 .tgws-status { width: 100%; max-width: 100%; font-size: 31px; font-weight: 750; letter-spacing: -.04em; }
 .tgws-hero > p { position: relative; max-width: 440px; margin-top: 10px; color: var(--muted); font-size: 13px; line-height: 1.65; }
 .tgws-action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
+.tgws-connect-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 41px; padding: 10px 15px; border: 1px solid color-mix(in srgb, var(--accent-2) 48%, transparent); border-radius: 12px; color: var(--text); background: color-mix(in srgb, var(--accent-2) 16%, var(--surface-2)); font-size: 12px; font-weight: 750; cursor: pointer; transition: background 180ms ease, transform 180ms ease; }
+.tgws-connect-button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-2) 27%, var(--surface-2)); transform: translateY(-1px); }
+.tgws-connect-button:disabled { opacity: .45; cursor: not-allowed; }
+.tgws-connect-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tgws-update-row { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; width: 100%; max-width: 510px; margin-top: 17px; padding-top: 15px; border-top: 1px solid var(--line); }
+.tgws-update-row[hidden], .tgws-connect-button[hidden] { display: none !important; }
+.tgws-update-detail { flex: 1 1 190px; display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.tgws-update-dot { flex: 0 0 7px; height: 7px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-2) 12%, transparent); }
+.tgws-update-row .ghost-button, .tgws-update-row .primary-button { flex: 0 0 auto; }
 .tgws-download { width: 100%; margin-top: 18px; }
 .tgws-download[hidden], .tgws-action-row [hidden] { display: none !important; }
 .tgws-download-label { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; color: var(--soft); font-size: 11px; }

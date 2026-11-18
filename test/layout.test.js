@@ -44,3 +44,13 @@ test('application icon has an alpha channel and an ICO for Windows', () => {
   assert.ok(ico.readUInt16LE(4) >= 5);
   assert.match(html, /\.\/assets\/app-icon\.svg/);
 });
+
+test('Telegram proxy provides direct connection and separate update controls', () => {
+  const telegram = html.split('id="tab-telegram"')[1].split('id="tab-tests"')[0];
+  for (const id of ['tgwsConnectBtn', 'tgwsCopyBtn', 'tgwsCheckUpdateBtn', 'tgwsUpdateBtn']) {
+    assert.match(telegram, new RegExp(`id="${id}"`));
+  }
+  assert.match(telegram, /Подключить Telegram/);
+  assert.match(css, /\.tgws-connect-button\s*\{/);
+  assert.match(css, /\.tgws-update-row\[hidden\]/);
+});

@@ -19,6 +19,10 @@ contextBridge.exposeInMainWorld('zapret', {
   tgwsInstall: () => invoke('tgws:install'),
   tgwsStart: () => invoke('tgws:start'),
   tgwsStop: () => invoke('tgws:stop'),
+  tgwsCheckUpdate: () => invoke('tgws:checkUpdate'),
+  tgwsUpdate: () => invoke('tgws:update'),
+  tgwsConnect: () => invoke('tgws:connect'),
+  tgwsCopyLink: () => invoke('tgws:copyLink'),
   tgwsOpenFolder: () => invoke('tgws:openFolder'),
   tgwsOpenRelease: () => invoke('tgws:openRelease'),
 
