@@ -9,6 +9,7 @@ const { describeStrategy, buildStrategy, customStrategyFilename } = require('./s
 const { TARGET_SERVICES, summarizeStrategy, pickAlternative, shouldSuggestSwitch, isHttpHealthy } = require('./smart-routing');
 const { monotonicDownloadPercent } = require('./download-progress');
 const { TgwsProxyManager, TGWS_RELEASES_URL } = require('./tgws-proxy');
+const { copyFileIfDifferent, copyDirFiltered } = require('./update-files');
 
 const APP_NAME = 'Zapret Control Center';
 const UPDATE_REPO = 'Flowseal/zapret-discord-youtube';
@@ -256,17 +257,25 @@ async function bootstrap() {
   setTimeout(autoUpdateTgws, 11000).unref();
   setInterval(autoUpdateTgws, 6 * 60 * 60 * 1000).unref();
 
-  if (settings.autoUpdateZapret) {
-    checkForZapretUpdate({ apply: true }).catch((error) => {
-      log(`Ошибка автообновления: ${error.message}`, 'error');
-    });
-  }
-
   if (settings.autoStartZapret && !runningAtLaunch.active) {
     setTimeout(() => {
       startZapret(settings.bestConfig || settings.selectedConfig, { remember: false, reason: 'autostart' })
         .catch((error) => log(`Автозапуск zapret не удался: ${error.message}`, 'error'));
     }, 1800);
+  }
+
+  // Never replace winws/WinDivert while autostart is still bringing up the
+  // Windows service. A previous race left service.bat on 1.10.4 while the
+  // locked WinDivert64.sys was still the old version (EBUSY).
+  if (settings.autoUpdateZapret) {
+    setTimeout(async () => {
+      try {
+        const [running, service] = await Promise.all([getWinwsStatus(), getServiceStatus()]);
+        await checkForZapretUpdate({ apply: !running.active && !service.installed && !startZapretInFlight });
+      } catch (error) {
+        log(`Ошибка проверки обновления: ${error.message}`, 'warn');
+      }
+    }, 9000).unref?.();
   }
 }
 
@@ -1315,9 +1324,15 @@ async function runDiagnostics() {
   add('process', running.active ? 'ok' : 'warning', 'Процесс Zapret',
     running.active ? `Запущено процессов winws.exe: ${running.processes.length}` : 'Zapret не запущен',
     !running.active ? 'restart-zapret' : null, !running.active ? 'Запустить' : null);
-  add('service', service.installed ? (service.state === 'RUNNING' ? 'ok' : 'warning') : 'info',
-    'Служба Windows', service.installed ? `Установлена, состояние: ${service.state}` : 'Не установлена (не обязательна)',
-    !service.installed ? 'install-service' : null, !service.installed ? 'Установить' : null);
+  const brokenService = service.installed && service.state === 'RUNNING' && !running.active;
+  add('service', brokenService ? 'error' : service.installed ? (service.state === 'RUNNING' ? 'ok' : 'warning') : 'info',
+    'Служба Windows', brokenService ? 'Windows показывает RUNNING, но winws.exe отсутствует — служба требует восстановления' :
+      service.installed ? `Установлена, состояние: ${service.state}` : 'Не установлена (не обязательна)',
+    brokenService || !service.installed ? 'install-service' : null,
+    brokenService ? 'Восстановить службу' : !service.installed ? 'Установить' : null);
+  add('repair-zapret', 'info', 'Восстановление файлов Zapret',
+    'Если обновление прервалось на WinDivert64.sys, можно заново скачать и применить официальный релиз, даже если версия указана как актуальная.',
+    'repair-release', 'Восстановить релиз');
   add('admin', 'info', 'Права администратора', admin ? 'Есть' : 'Нет — некоторые исправления потребуют подтверждения UAC');
 
   try {
@@ -1358,6 +1373,11 @@ async function applyDiagnosticFix(fixId) {
     case 'install-service':
       await installZapretService(settings.selectedConfig);
       break;
+    case 'repair-release': {
+      const latestVersion = (await fetchText(VERSION_URL)).trim();
+      await applyZapretUpdate(latestVersion, { restartAfterRepair: true });
+      break;
+    }
     case 'disable-game-filter':
       settings.gameFilterMode = 'disabled';
       setGameFilterMode('disabled');
@@ -1470,6 +1490,7 @@ async function startZapret(configName, options = {}) {
 async function startZapretInner(configName, options = {}) {
   const config = parseConfig(configName || settings.selectedConfig);
   ensureRequiredLists();
+  if (!fs.existsSync(winwsExe)) throw new Error(`winws.exe не найден: ${winwsExe}. Проверьте антивирус и восстановите файлы Zapret.`);
 
   const service = await getServiceStatus();
   if (service.installed && options.useService !== false) {
@@ -1493,18 +1514,30 @@ async function startZapretInner(configName, options = {}) {
     }
 
     await stopZapretProcesses({ stopService: true, quiet: true, killProcesses: false });
+    if (!await waitForServiceStopped()) {
+      throw new Error('Старая служба zapret не остановилась. Проверьте её состояние в диагностике и попробуйте перезагрузить Windows.');
+    }
     log(`Запуск службы zapret: ${config.name}`);
-    await execFileAsync('sc.exe', ['start', SERVICE_NAME], { timeout: 10000 });
+    await runServiceCommand(['start', SERVICE_NAME]);
 
     if (options.remember !== false) {
       settings.selectedConfig = config.name;
       saveSettings();
     }
 
-    await delay(1200);
-    const running = await getWinwsStatus();
-    if (!running.active) {
-      throw new Error('Служба запущена, но winws.exe не работает. Проверьте списки в zapret/lists и попробуйте другой конфиг.');
+    if (!await waitForWinwsRunning()) {
+      const detail = await getStoppedServiceDetail();
+      // Explicit user action may repair a stale service command line after a
+      // partial update. Background/watchdog starts must never show surprise UAC.
+      if (options.reason === 'manual' || options.reason === 'diagnostic-fix') {
+        log(`Служба не запустила winws.exe (${detail}); переустанавливаю службу`, 'warn');
+        await installZapretService(config.name);
+        if (await waitForWinwsRunning(2500)) {
+          await sendState();
+          return config;
+        }
+      }
+      throw new Error(`Служба zapret не запустила winws.exe (${detail}). Откройте «Диагностика» или переустановите службу в настройках. Конфиг: ${config.name}.`);
     }
 
     await sendState();
@@ -1557,6 +1590,41 @@ async function startZapretInner(configName, options = {}) {
   await delay(500);
   await sendState();
   return config;
+}
+
+async function waitForWinwsRunning(timeoutMs = 6000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await getWinwsStatus()).active) {
+      // A process that immediately exits must not be reported as working.
+      await delay(400);
+      if ((await getWinwsStatus()).active) return true;
+    }
+    await delay(400);
+  }
+  return false;
+}
+
+async function waitForServiceStopped(timeoutMs = 7000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = await getServiceStatus();
+    if (!status.installed || status.state === 'STOPPED') return true;
+    await delay(350);
+  }
+  return false;
+}
+
+async function getStoppedServiceDetail() {
+  try {
+    const { stdout } = await execFileAsync('sc.exe', ['queryex', SERVICE_NAME], { timeout: 5000 });
+    const state = stdout.match(/STATE\s*:\s*\d+\s+([A-Z_]+)/i)?.[1] || 'UNKNOWN';
+    const win32 = Number(stdout.match(/WIN32_EXIT_CODE\s*:\s*(\d+)/i)?.[1] || 0);
+    const service = Number(stdout.match(/SERVICE_EXIT_CODE\s*:\s*(\d+)/i)?.[1] || 0);
+    return `STATE=${state}, WIN32_EXIT_CODE=${win32}, SERVICE_EXIT_CODE=${service}`;
+  } catch (error) {
+    return `sc queryex: ${String(error.message).slice(0, 140)}`;
+  }
 }
 
 async function stopZapretProcesses(options = {}) {
@@ -2013,7 +2081,7 @@ function pushNotification(payload) {
   send('notification:push', payload);
 }
 
-async function applyZapretUpdate(latestVersion) {
+async function applyZapretUpdate(latestVersion, options = {}) {
   lastUpdate = {
     ...lastUpdate,
     status: 'downloading',
@@ -2031,8 +2099,9 @@ async function applyZapretUpdate(latestVersion) {
     throw new Error('В последнем релизе не найден zip-архив');
   }
 
-  const wasRunning = (await getWinwsStatus()).active;
-  if (wasRunning) await stopZapretProcesses({ stopService: true, quiet: true });
+  const [running, service] = await Promise.all([getWinwsStatus(), getServiceStatus()]);
+  const wasRunning = running.active;
+  let stoppedForUpdate = false;
 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'zapret-update-'));
   const zipPath = path.join(tempRoot, asset.name);
@@ -2060,11 +2129,40 @@ async function applyZapretUpdate(latestVersion) {
     const extractedRoot = findExtractedZapretRoot(extractDir);
     if (!extractedRoot) throw new Error('В архиве не найден service.bat');
 
-    backupZapretFiles();
-    applyUpdateFiles(extractedRoot);
-    ensureRequiredLists();
+    // Download and extract completely before stopping a working connection.
+    // Network errors must not leave the user offline.
+    if (wasRunning || service.installed) {
+      stoppedForUpdate = true;
+      await stopZapretProcesses({ stopService: true, quiet: true });
+      if (service.installed && !await waitForServiceStopped()) {
+        throw new Error('Не удалось остановить службу перед обновлением. Файлы Zapret не изменены.');
+      }
+    }
+
+    const backupDir = backupZapretFiles();
+    try {
+      applyUpdateFiles(extractedRoot);
+      ensureRequiredLists();
+    } catch (error) {
+      try {
+        restoreZapretFiles(backupDir);
+        log('Неудачное обновление отменено — восстановлены предыдущие файлы Zapret', 'warn');
+      } catch (restoreError) {
+        log(`Не удалось полностью откатить обновление: ${restoreError.message}`, 'error');
+      }
+      throw error;
+    }
     configsCache = null;
     trayMenuSignature = null;
+  } catch (error) {
+    if (wasRunning && stoppedForUpdate) {
+      try {
+        await startZapret(settings.bestConfig || settings.selectedConfig, { remember: false, reason: 'update-rollback' });
+      } catch (restartError) {
+        log(`Не удалось восстановить подключение после ошибки обновления: ${restartError.message}`, 'error');
+      }
+    }
+    throw error;
   } finally {
     // Архив и распакованные файлы иначе навсегда остаются в %TEMP%.
     try {
@@ -2084,8 +2182,11 @@ async function applyZapretUpdate(latestVersion) {
   send('update:progress', lastUpdate);
   log(lastUpdate.message);
 
-  if (wasRunning && settings.autoStartZapret) {
-    await startZapret(settings.bestConfig || settings.selectedConfig, { remember: false, reason: 'update' });
+  if ((wasRunning && settings.autoStartZapret) || options.restartAfterRepair) {
+    await startZapret(settings.bestConfig || settings.selectedConfig, {
+      remember: false,
+      reason: options.restartAfterRepair ? 'manual' : 'update'
+    });
   }
 }
 
@@ -2118,6 +2219,19 @@ function backupZapretFiles() {
   }
 
   log(`Резервная копия zapret: ${backupDir}`);
+  return backupDir;
+}
+
+function restoreZapretFiles(backupDir) {
+  for (const name of fs.readdirSync(backupDir)) {
+    if (/^general.*\.bat$/i.test(name) || name === 'service.bat') {
+      copyFileIfDifferent(path.join(backupDir, name), path.join(rootDir, name));
+    }
+  }
+  for (const directory of ['bin', 'lists', 'utils']) {
+    copyDirFiltered(path.join(backupDir, directory), path.join(rootDir, directory));
+  }
+  configsCache = null;
 }
 
 function pruneOldBackups(keep = 3) {
@@ -2137,15 +2251,24 @@ function pruneOldBackups(keep = 3) {
 }
 
 function applyUpdateFiles(sourceRoot) {
-  for (const name of fs.readdirSync(sourceRoot)) {
-    if (/^general.*\.bat$/i.test(name) || name === 'service.bat') {
-      fs.copyFileSync(path.join(sourceRoot, name), path.join(rootDir, name));
-    }
+  // Touch the kernel driver first: if Windows still holds a different driver
+  // open, fail before changing *anything*, including service.bat's version.
+  const driverSource = path.join(sourceRoot, 'bin', 'WinDivert64.sys');
+  if (fs.existsSync(driverSource)) {
+    copyFileIfDifferent(driverSource, path.join(binDir, 'WinDivert64.sys'));
   }
-
-  copyDirFiltered(path.join(sourceRoot, 'bin'), binDir);
+  copyDirFiltered(path.join(sourceRoot, 'bin'), binDir, (name) => name !== 'WinDivert64.sys');
   mergeListsDirectory(path.join(sourceRoot, 'lists'), listsDir);
   copyDirFiltered(path.join(sourceRoot, 'utils'), utilsDir, (name) => !/\.enabled$/i.test(name));
+
+  for (const name of fs.readdirSync(sourceRoot)) {
+    if (/^general.*\.bat$/i.test(name)) {
+      copyFileIfDifferent(path.join(sourceRoot, name), path.join(rootDir, name));
+    }
+  }
+  // Only advertise the new version after the binaries and strategies landed.
+  const serviceSource = path.join(sourceRoot, 'service.bat');
+  if (fs.existsSync(serviceSource)) copyFileIfDifferent(serviceSource, path.join(rootDir, 'service.bat'));
 }
 
 function mergeListsDirectory(source, target) {
@@ -2228,22 +2351,6 @@ function getListLineKey(line) {
 
 function countMeaningfulLines(text) {
   return text.split(/\r?\n/).map(getListLineKey).filter(Boolean).length;
-}
-
-function copyDirFiltered(source, target, filter = () => true) {
-  if (!fs.existsSync(source)) return;
-  fs.mkdirSync(target, { recursive: true });
-
-  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
-    if (!filter(entry.name)) continue;
-    const from = path.join(source, entry.name);
-    const to = path.join(target, entry.name);
-    if (entry.isDirectory()) {
-      copyDirFiltered(from, to, filter);
-    } else {
-      fs.copyFileSync(from, to);
-    }
-  }
 }
 
 async function runConfigTests(options) {
@@ -2785,6 +2892,9 @@ async function installZapretService(configName) {
 
   if (!admin) {
     await runElevatedServiceInstall(config);
+    if (!await waitForWinwsRunning()) {
+      throw new Error(`Служба переустановлена, но winws.exe не запустился (${await getStoppedServiceDetail()}). Проверьте блокировки драйвера WinDivert.`);
+    }
     settings.bestConfig = config.name;
     settings.selectedConfig = config.name;
     saveSettings();
@@ -2813,6 +2923,9 @@ async function installZapretService(configName) {
     '/f'
   ], 5000);
   await runServiceCommand(['start', SERVICE_NAME]);
+  if (!await waitForWinwsRunning()) {
+    throw new Error(`Служба установлена, но winws.exe не запустился (${await getStoppedServiceDetail()}). Проверьте блокировки драйвера WinDivert.`);
+  }
   settings.bestConfig = config.name;
   settings.selectedConfig = config.name;
   saveSettings();
@@ -2868,7 +2981,7 @@ async function runElevatedServiceInstall(config) {
     // Прежде чем показывать ошибку, спрашиваем саму систему.
     invalidateServiceCache();
     const service = await getServiceStatus();
-    if (service.installed && service.state === 'RUNNING') {
+    if (service.installed && service.state === 'RUNNING' && await waitForWinwsRunning(2500)) {
       log(`Служба установилась, но скрипт вернул ошибку: ${error.message}`, 'warn');
       return;
     }
